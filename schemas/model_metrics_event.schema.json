@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://real-time-risk/schemas/model_metrics_event.schema.json",
+  "title": "ModelMetricsEvent",
+  "type": "object",
+  "required": [
+    "model_id", "model_version", "ts", "eval_window_s", "psi_by_feature",
+    "ks_stat_by_feature", "drift_detected", "events_scored", "throughput_eps",
+    "p50_inference_ms", "p99_inference_ms"
+  ],
+  "properties": {
+    "model_id": { "type": "string" },
+    "model_version": { "type": "string" },
+    "ts": { "type": "string", "format": "date-time" },
+    "eval_window_s": { "type": "number" },
+    "precision": { "type": ["number", "null"] },
+    "recall": { "type": ["number", "null"] },
+    "f1": { "type": ["number", "null"] },
+    "false_positive_rate": { "type": ["number", "null"] },
+    "psi_by_feature": { "type": "object", "additionalProperties": { "type": "number" } },
+    "ks_stat_by_feature": { "type": "object", "additionalProperties": { "type": "number" } },
+    "drift_detected": { "type": "boolean" },
+    "events_scored": { "type": "integer", "minimum": 0 },
+    "throughput_eps": { "type": "number" },
+    "p50_inference_ms": { "type": "number" },
+    "p99_inference_ms": { "type": "number" }
+  }
+}

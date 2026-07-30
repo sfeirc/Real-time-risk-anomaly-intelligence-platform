@@ -1,0 +1,190 @@
+# Data Contracts
+
+Canonical event schemas shared by every service. Rust (`serde`), Python (`pydantic`)
+and TypeScript types in each service are hand-kept in sync with this document;
+JSON Schema copies live under `schemas/` and are enforced in integration tests
+(`tests/integration/test_contracts.py`) so drift between services fails CI
+instead of failing at 3am in production.
+
+Two synthetic domains are simulated end-to-end so the platform reads as
+relevant to both quant/market-risk and fintech/fraud audiences:
+
+- `market`  — crypto trade ticks (spread, volatility, microstructure)
+- `payments` — card/wire/ACH transactions (fraud, latency, decline patterns)
+
+Kafka topics (Redpanda), 6 partitions each unless noted, keyed by `entity_key`
+so all events for one symbol/merchant land on the same partition and preserve
+order for stateful windowing:
+
+| Topic             | Producer         | Consumer                     | Key           |
+|--------------------|------------------|-------------------------------|---------------|
+| `raw-events`        | ingestion        | feature-service                | `entity_key`  |
+| `features`           | feature-service  | ml-inference                   | `entity_key`  |
+| `alerts`              | ml-inference     | api-gateway                    | `entity_key`  |
+| `model-metrics`        | ml-inference     | api-gateway                    | `model_id`    |
+
+## 1. Raw event envelope (`raw-events`)
+
+Emitted by `data-generator`, re-stamped with `ts_ingest` by `ingestion` on
+receipt (this delta is `latency_ingestion_ms`, the first leg of the headline
+"ingestion → alert" latency metric).
+
+```jsonc
+{
+  "event_id": "uuid",                // generator-assigned
+  "domain": "market" | "payments",
+  "entity_key": "string",            // symbol (market) or merchant_id (payments) — Kafka partition key
+  "source": "string",                // synthetic exchange / PSP name
+  "seq": "uint64",                   // per-entity monotonic sequence, used to detect gaps/reordering
+  "ts_event": "RFC3339",             // origin timestamp (set by generator)
+  "ts_ingest": "RFC3339 | null",     // set by ingestion service on receipt; null until then
+  "corrupted": "bool",               // generator-injected corruption flag (ground truth for eval)
+  "scenario_label": "string | null", // generator-injected anomaly scenario ground truth, null in normal operation
+  "payload": "MarketPayload | PaymentsPayload"
+}
+```
+
+### MarketPayload
+
+```jsonc
+{
+  "symbol": "string",       // e.g. "BTC-USD"
+  "price": "float64",
+  "size": "float64",
+  "side": "buy" | "sell",
+  "bid": "float64",
+  "ask": "float64",
+  "exchange_latency_ms": "float64"
+}
+```
+
+### PaymentsPayload
+
+```jsonc
+{
+  "txn_id": "uuid",
+  "merchant_id": "string",
+  "account_id_hash": "string",   // sha256, never a raw PAN/account number
+  "amount": "float64",
+  "currency": "ISO4217 string",
+  "channel": "card_present" | "card_not_present" | "wire" | "ach",
+  "country": "ISO3166-1 alpha2",
+  "processing_latency_ms": "float64",
+  "status": "approved" | "declined" | "error"
+}
+```
+
+## 2. Feature event (`features`)
+
+Emitted by `feature-service` once per entity per tumbling window
+(`window_size_s`, default 2s market / 5s payments). Carries every input the
+downstream detectors need — no service re-reads `raw-events`.
+
+```jsonc
+{
+  "entity_key": "string",
+  "domain": "market" | "payments",
+  "window_end": "RFC3339",
+  "window_size_s": "float64",
+  "count": "uint64",
+  "throughput_eps": "float64",       // count / window_size_s
+
+  // shared
+  "latency_p50_ms": "float64",
+  "latency_p99_ms": "float64",
+  "error_rate": "float64",           // status=="error"/"declined" (payments) or corrupted-flag rate (market)
+
+  // market-only (null for payments)
+  "vwap": "float64 | null",
+  "spread_bps": "float64 | null",
+  "realized_vol": "float64 | null",  // stdev of log returns within window, annualized
+  "order_imbalance": "float64 | null",
+
+  // payments-only (null for market)
+  "mean_amount": "float64 | null",
+  "sum_amount": "float64 | null",
+  "decline_rate": "float64 | null",
+  "distinct_accounts": "uint64 | null",
+
+  // rolling statistical state (both domains)
+  "ewma_mean": "float64",
+  "ewma_var": "float64",
+  "zscore": "float64",               // (primary_metric - ewma_mean) / sqrt(ewma_var)
+  "primary_metric": "float64"        // realized_vol (market) or mean_amount (payments) — what zscore/EWMA track
+}
+```
+
+`primary_metric` exists so the statistical detectors have one well-defined
+signal per domain instead of guessing which of a dozen fields matters.
+
+## 3. Alert event (`alerts`)
+
+Emitted by `ml-inference` for any window whose ensemble anomaly score crosses
+the `watch` threshold (see `docs/metrics.md` for thresholds).
+
+```jsonc
+{
+  "alert_id": "uuid",
+  "entity_key": "string",
+  "domain": "market" | "payments",
+  "ts": "RFC3339",
+  "window_end": "RFC3339",           // features window this alert was computed from
+  "anomaly_score": "float64",        // 0..1 ensemble score
+  "severity": "watch" | "alert" | "critical",
+  "action": "watch" | "alert" | "block",
+  "detectors": {
+    "zscore": "float64",
+    "ewma": "float64",
+    "cusum": "float64",
+    "isolation_forest": "float64",
+    "autoencoder": "float64",
+    "xgboost": "float64 | null"      // null until a labeled model is trained/loaded
+  },
+  "explanation": {
+    "probable_cause": "volatility_spike" | "latency_incident" | "fraud_pattern"
+                     | "data_corruption" | "regime_change" | "volume_spike" | "unknown",
+    "top_features": [
+      { "feature": "string", "value": "float64", "baseline": "float64", "contribution": "float64" }
+    ]
+  },
+  "model_version": "string",
+  "drift_flag": "bool",
+  "latency_ingest_to_alert_ms": "float64"  // ts - raw event ts_event, the headline latency metric
+}
+```
+
+## 4. Model/drift metrics event (`model-metrics`)
+
+Emitted periodically (default every 30s) by `ml-inference`.
+
+```jsonc
+{
+  "model_id": "string",
+  "model_version": "string",
+  "ts": "RFC3339",
+  "eval_window_s": "float64",
+  "precision": "float64 | null",
+  "recall": "float64 | null",
+  "f1": "float64 | null",
+  "false_positive_rate": "float64 | null",
+  "psi_by_feature": { "feature_name": "float64" },   // Population Stability Index vs training baseline
+  "ks_stat_by_feature": { "feature_name": "float64" },
+  "drift_detected": "bool",
+  "events_scored": "uint64",
+  "throughput_eps": "float64",
+  "p50_inference_ms": "float64",
+  "p99_inference_ms": "float64"
+}
+```
+
+## Severity → action mapping (rules engine defaults)
+
+| anomaly_score | severity   | default action |
+|----------------|-----------|-----------------|
+| < 0.55           | (no alert) | —                |
+| 0.55 – 0.75        | `watch`    | `watch`           |
+| 0.75 – 0.90         | `alert`    | `alert`           |
+| ≥ 0.90                | `critical` | `block`           |
+
+Thresholds and the score→action mapping are configurable per-domain in
+`services/ml-inference/app/rules.yaml` — see `docs/metrics.md`.

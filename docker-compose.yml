@@ -1,0 +1,208 @@
+name: real-time-risk
+
+x-service-env: &service-env
+  env_file:
+    - .env
+
+networks:
+  risk-net:
+    driver: bridge
+
+volumes:
+  redpanda-data:
+  clickhouse-data:
+  grafana-data:
+
+services:
+  # ---------------------------------------------------------------------
+  # Streaming backbone
+  # ---------------------------------------------------------------------
+  redpanda:
+    image: redpandadata/redpanda:v24.2.18
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --memory 1G
+      - --default-log-level=info
+    ports:
+      - "19092:19092" # Kafka API (external)
+      - "18081:18081" # Schema registry
+      - "18082:18082" # Pandaproxy (REST)
+      - "9644:9644"   # Admin API / Prometheus metrics
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    networks: [risk-net]
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redpanda-console:
+    image: redpandadata/console:v2.7.2
+    container_name: redpanda-console
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      KAFKA_SCHEMAREGISTRY_ENABLED: "true"
+      KAFKA_SCHEMAREGISTRY_URLS: http://redpanda:8081
+    ports:
+      - "8090:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks: [risk-net]
+
+  redpanda-topics-init:
+    image: redpandadata/redpanda:v24.2.18
+    container_name: redpanda-topics-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks: [risk-net]
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "rpk topic create raw-events    --partitions 6 --replicas 1 --brokers redpanda:9092 || true &&
+       rpk topic create features       --partitions 6 --replicas 1 --brokers redpanda:9092 || true &&
+       rpk topic create alerts          --partitions 6 --replicas 1 --brokers redpanda:9092 || true &&
+       rpk topic create model-metrics    --partitions 1 --replicas 1 --brokers redpanda:9092 || true"
+
+  # ---------------------------------------------------------------------
+  # Storage
+  # ---------------------------------------------------------------------
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+    ports:
+      - "8123:8123" # HTTP
+      - "9000:9000" # native
+      - "9363:9363" # prometheus metrics
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./infra/clickhouse/init:/docker-entrypoint-initdb.d
+      - ./infra/clickhouse/config.d:/etc/clickhouse-server/config.d
+    networks: [risk-net]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # ---------------------------------------------------------------------
+  # Observability
+  # ---------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks: [risk-net]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus, clickhouse]
+    networks: [risk-net]
+
+  # ---------------------------------------------------------------------
+  # Application services
+  # ---------------------------------------------------------------------
+  data-generator:
+    build: ./services/data-generator
+    container_name: data-generator
+    <<: *service-env
+    ports:
+      - "8765:8765"
+    networks: [risk-net]
+
+  ingestion:
+    build: ./services/ingestion
+    container_name: ingestion
+    <<: *service-env
+    environment:
+      RUST_LOG: info
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      redpanda-topics-init:
+        condition: service_completed_successfully
+      data-generator:
+        condition: service_started
+    ports:
+      - "9101:9101"
+    networks: [risk-net]
+
+  feature-service:
+    build: ./services/feature-service
+    container_name: feature-service
+    <<: *service-env
+    environment:
+      RUST_LOG: info
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "9102:9102"
+    networks: [risk-net]
+
+  ml-inference:
+    build: ./services/ml-inference
+    container_name: ml-inference
+    <<: *service-env
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+      - "9103:9103"
+    networks: [risk-net]
+
+  api-gateway:
+    build: ./services/api-gateway
+    container_name: api-gateway
+    <<: *service-env
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    networks: [risk-net]
+
+  dashboard:
+    build:
+      context: ./services/dashboard
+      args:
+        VITE_API_BASE_URL: http://localhost:8080
+        VITE_WS_URL: ws://localhost:8080/ws
+    container_name: dashboard
+    ports:
+      - "5173:80"
+    depends_on: [api-gateway]
+    networks: [risk-net]

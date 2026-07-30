@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://real-time-risk/schemas/raw_event.schema.json",
+  "title": "RawEvent",
+  "type": "object",
+  "required": ["event_id", "domain", "entity_key", "source", "seq", "ts_event", "corrupted", "payload"],
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "domain": { "type": "string", "enum": ["market", "payments"] },
+    "entity_key": { "type": "string", "minLength": 1 },
+    "source": { "type": "string" },
+    "seq": { "type": "integer", "minimum": 0 },
+    "ts_event": { "type": "string", "format": "date-time" },
+    "ts_ingest": { "type": ["string", "null"], "format": "date-time" },
+    "corrupted": { "type": "boolean" },
+    "scenario_label": { "type": ["string", "null"] },
+    "payload": {
+      "oneOf": [
+        { "$ref": "#/definitions/marketPayload" },
+        { "$ref": "#/definitions/paymentsPayload" }
+      ]
+    }
+  },
+  "definitions": {
+    "marketPayload": {
+      "type": "object",
+      "required": ["symbol", "price", "size", "side", "bid", "ask", "exchange_latency_ms"],
+      "properties": {
+        "symbol": { "type": "string" },
+        "price": { "type": "number" },
+        "size": { "type": "number" },
+        "side": { "type": "string", "enum": ["buy", "sell"] },
+        "bid": { "type": "number" },
+        "ask": { "type": "number" },
+        "exchange_latency_ms": { "type": "number" }
+      }
+    },
+    "paymentsPayload": {
+      "type": "object",
+      "required": ["txn_id", "merchant_id", "account_id_hash", "amount", "currency", "channel", "country", "processing_latency_ms", "status"],
+      "properties": {
+        "txn_id": { "type": "string", "format": "uuid" },
+        "merchant_id": { "type": "string" },
+        "account_id_hash": { "type": "string" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 3 },
+        "channel": { "type": "string", "enum": ["card_present", "card_not_present", "wire", "ach"] },
+        "country": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "processing_latency_ms": { "type": "number" },
+        "status": { "type": "string", "enum": ["approved", "declined", "error"] }
+      }
+    }
+  }
+}

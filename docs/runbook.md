@@ -1,0 +1,82 @@
+# Runbook — local deployment
+
+## Prerequisites
+
+- Docker + Docker Compose v2
+- Rust 1.75+ (only needed to build/test outside Docker)
+- Python 3.11+ (only needed to build/test outside Docker)
+- Node 20+ (only needed to build/test outside Docker)
+
+## Quickstart
+
+```bash
+cp .env.example .env
+make infra-up      # Redpanda + ClickHouse + Prometheus + Grafana
+make up             # full stack (builds + starts every service)
+```
+
+Endpoints once everything is healthy:
+
+| Service | URL |
+|---|---|
+| Dashboard | http://localhost:5173 |
+| API gateway | http://localhost:8080 (REST), ws://localhost:8080/ws |
+| ML inference (direct) | http://localhost:8000 |
+| Redpanda Console (topic browser) | http://localhost:8090 |
+| ClickHouse HTTP | http://localhost:8123 |
+| Prometheus | http://localhost:9090 |
+| Grafana | http://localhost:3000 (admin / `GRAFANA_ADMIN_PASSWORD` in `.env`) |
+
+## Common operations
+
+```bash
+make ps                 # service status
+make logs                # tail all logs
+make down                 # stop everything, keep volumes
+make clean                 # stop + delete volumes (full reset)
+
+make test                   # rust + python + js test suites
+make lint                    # clippy + ruff + eslint
+
+make eval                     # precision/recall/drift report -> docs/benchmarks/latest.json
+make load-test                 # throughput/latency benchmark -> docs/benchmarks/latest.json
+make demo                       # scripted end-to-end demo (see scripts/demo.sh)
+```
+
+## Inspecting data directly
+
+```bash
+# Kafka topics
+docker exec -it redpanda rpk topic list
+docker exec -it redpanda rpk topic consume alerts --num 5
+
+# ClickHouse
+docker exec -it clickhouse clickhouse-client --query \
+  "SELECT ts, entity_key, severity, anomaly_score, probable_cause FROM risk.alerts ORDER BY ts DESC LIMIT 20"
+```
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `redpanda-topics-init` exits non-zero | Redpanda not yet healthy when topic creation ran | `docker compose up -d redpanda-topics-init` again — it's idempotent (`\|\| true` on each `rpk topic create`) |
+| `ingestion` crash-loops | `data-generator` not up yet / WS URL wrong | check `INGESTION_WS_URL` in `.env` matches the compose service name (`data-generator`, not `localhost`) |
+| No alerts appear on dashboard | `ml-inference` still warming up the baseline (first ~30s of EWMA/IsolationForest warm-up window are intentionally quiet — see `docs/metrics.md`) | wait, or check `ml-inference` logs for `warmup_complete` |
+| ClickHouse init scripts didn't run | volume already existed from a previous run | `make clean` then `make infra-up` (init scripts only run on an empty data dir) |
+| Grafana panels empty | Prometheus scrape target down, or ClickHouse plugin not installed yet | check http://localhost:9090/targets ; Grafana installs `grafana-clickhouse-datasource` on first boot, can take ~30s |
+
+## Injecting anomaly scenarios manually
+
+`data-generator` injects scenarios automatically at
+`DATA_GENERATOR_SCENARIO_PROBABILITY` (default 2% of windows). To force one on
+demand for a demo:
+
+```bash
+curl -X POST http://localhost:8765/inject \
+  -H 'Content-Type: application/json' \
+  -d '{"domain":"market","entity_key":"BTC-USD","scenario":"volatility_spike","duration_s":30}'
+```
+
+Valid `scenario` values: `volatility_spike`, `fraud_pattern`, `latency_incident`,
+`data_corruption`, `regime_change`, `volume_spike`. See
+`services/data-generator/app/scenarios.py` for exact parameters.

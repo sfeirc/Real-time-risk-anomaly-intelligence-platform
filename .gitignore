@@ -1,0 +1,55 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.ipynb_checkpoints
+
+# Node / dashboard
+node_modules/
+dist/
+.vite/
+*.local
+
+# ML artifacts
+*.onnx
+*.pt
+*.pkl
+models/artifacts/
+!services/ml-inference/app/models/**/*.py
+
+# Data
+*.parquet
+*.csv
+data/raw/
+data/processed/
+
+# Infra state
+infra/clickhouse/data/
+infra/redpanda/data/
+infra/grafana/data/
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Legacy / unrelated
+ruvector.db
+
+# Logs
+*.log
+logs/

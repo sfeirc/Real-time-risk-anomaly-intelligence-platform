@@ -1,0 +1,151 @@
+use std::time::Instant;
+
+use futures_util::StreamExt;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+use crate::backoff::backoff_delay;
+use crate::metrics::Metrics;
+use crate::model::RawEvent;
+use crate::sink::EventSink;
+
+/// Connect → stream → on any disconnect, backoff and reconnect. Runs forever;
+/// the process is meant to be supervised by the container runtime, not by
+/// application-level "give up after N attempts" logic — a data feed outage
+/// is not a reason to exit.
+pub async fn run<S: EventSink>(ws_url: &str, sink: &S, metrics: &Metrics) -> ! {
+    let mut attempt: u32 = 0;
+    loop {
+        metrics.ws_reconnects_total.inc();
+        match connect_async(ws_url).await {
+            Ok((stream, _response)) => {
+                tracing::info!(url = ws_url, "connected to data source");
+                metrics.ws_connected.set(1);
+                attempt = 0;
+                if let Err(e) = handle_connection(stream, sink, metrics).await {
+                    tracing::warn!(error = %e, "data source connection dropped");
+                }
+                metrics.ws_connected.set(0);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, attempt, "failed to connect to data source");
+            }
+        }
+        let delay = backoff_delay(attempt);
+        attempt = attempt.saturating_add(1);
+        tokio::time::sleep(delay).await;
+    }
+}
+
+async fn handle_connection<S, T>(
+    stream: tokio_tungstenite::WebSocketStream<T>,
+    sink: &S,
+    metrics: &Metrics,
+) -> Result<(), tokio_tungstenite::tungstenite::Error>
+where
+    S: EventSink,
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let (_write, mut read) = stream.split();
+    while let Some(frame) = read.next().await {
+        let frame = frame?;
+        let Message::Text(text) = frame else { continue };
+        handle_frame(&text, sink, metrics).await;
+    }
+    Ok(())
+}
+
+async fn handle_frame<S: EventSink>(text: &str, sink: &S, metrics: &Metrics) {
+    let received_at = Instant::now();
+    let mut event: RawEvent = match serde_json::from_str(text) {
+        Ok(event) => event,
+        Err(e) => {
+            metrics.parse_errors_total.inc();
+            tracing::warn!(error = %e, "failed to parse raw event, dropping");
+            return;
+        }
+    };
+    event.ts_ingest = Some(chrono::Utc::now().to_rfc3339());
+    let domain = event.domain.as_str();
+
+    metrics.inflight_sends.inc();
+    let result = sink.send(&event).await;
+    metrics.inflight_sends.dec();
+
+    match result {
+        Ok(()) => {
+            metrics.events_total.with_label_values(&[domain]).inc();
+            let elapsed_ms = received_at.elapsed().as_secs_f64() * 1000.0;
+            metrics.ws_to_kafka_ms.observe(elapsed_ms);
+        }
+        Err(e) => {
+            metrics.kafka_errors_total.inc();
+            tracing::warn!(error = %e, entity = %event.entity_key, "failed to produce event to kafka");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sink::test_support::MockSink;
+
+    #[tokio::test]
+    async fn valid_frame_is_forwarded_to_sink_with_ts_ingest_stamped() {
+        let sink = MockSink::default();
+        let metrics = Metrics::new();
+        let json = r#"{
+            "event_id": "9069c681-fa99-41dd-98a2-c4af7df360d1",
+            "domain": "market",
+            "entity_key": "BTC-USD",
+            "source": "synthetic-exchange-1",
+            "seq": 1,
+            "ts_event": "2026-07-30T23:09:30.852113+00:00",
+            "corrupted": false,
+            "payload": {
+                "symbol": "BTC-USD", "price": 65000.0, "size": 0.1, "side": "sell",
+                "bid": 64990.0, "ask": 65010.0, "exchange_latency_ms": 3.5
+            }
+        }"#;
+        handle_frame(json, &sink, &metrics).await;
+        let sent = sink.sent.lock().unwrap();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].ts_ingest.is_some());
+        assert_eq!(metrics.events_total.with_label_values(&["market"]).get(), 1);
+        assert_eq!(metrics.parse_errors_total.get(), 0);
+    }
+
+    #[tokio::test]
+    async fn malformed_frame_increments_parse_errors_and_is_dropped() {
+        let sink = MockSink::default();
+        let metrics = Metrics::new();
+        handle_frame("{not valid json", &sink, &metrics).await;
+        assert_eq!(sink.sent.lock().unwrap().len(), 0);
+        assert_eq!(metrics.parse_errors_total.get(), 1);
+    }
+
+    #[tokio::test]
+    async fn sink_failure_increments_kafka_errors_not_events_total() {
+        let sink = MockSink::default();
+        sink.fail_next.store(true, std::sync::atomic::Ordering::SeqCst);
+        let metrics = Metrics::new();
+        let json = r#"{
+            "event_id": "9069c681-fa99-41dd-98a2-c4af7df360d1",
+            "domain": "payments",
+            "entity_key": "merch_grocery_01",
+            "source": "synthetic-psp-1",
+            "seq": 1,
+            "ts_event": "2026-07-30T23:09:30.852113+00:00",
+            "corrupted": false,
+            "payload": {
+                "txn_id": "9069c681-fa99-41dd-98a2-c4af7df360d1",
+                "merchant_id": "merch_grocery_01", "account_id_hash": "abc",
+                "amount": 10.0, "currency": "USD", "channel": "card_present",
+                "country": "US", "processing_latency_ms": 5.0, "status": "approved"
+            }
+        }"#;
+        handle_frame(json, &sink, &metrics).await;
+        assert_eq!(sink.sent.lock().unwrap().len(), 0);
+        assert_eq!(metrics.kafka_errors_total.get(), 1);
+        assert_eq!(metrics.events_total.with_label_values(&["payments"]).get(), 0);
+    }
+}
