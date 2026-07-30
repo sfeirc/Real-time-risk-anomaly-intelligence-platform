@@ -1,0 +1,22 @@
+<clickhouse>
+    <!-- Explicit, not relying on the image's own docker_related_config.xml:
+         docker-compose mounts this file (not the whole config.d/ directory)
+         precisely so the image's own generated config.d files — including
+         the one that normally sets listen_host to 0.0.0.0 — survive
+         alongside it. Bind-mounting an entire directory over config.d
+         replaces its contents rather than merging, which silently drops
+         that file and leaves ClickHouse listening on 127.0.0.1 only —
+         unreachable from any other container on risk-net. See
+         docs/runbook.md troubleshooting. -->
+    <listen_host>0.0.0.0</listen_host>
+    <listen_host>::</listen_host>
+    <listen_try>1</listen_try>
+
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+    </prometheus>
+</clickhouse>

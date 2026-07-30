@@ -82,6 +82,14 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
     container_name: clickhouse
+    environment:
+      # Without these, the official image restricts the `default` user to
+      # localhost-only connections — which breaks every other container on
+      # risk-net (they reach it as `clickhouse`, not `127.0.0.1`), not just
+      # host access. See docs/runbook.md troubleshooting.
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-risk_dev_only}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-risk}
     ulimits:
       nofile: { soft: 262144, hard: 262144 }
     ports:
@@ -91,7 +99,7 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./infra/clickhouse/init:/docker-entrypoint-initdb.d
-      - ./infra/clickhouse/config.d:/etc/clickhouse-server/config.d
+      - ./infra/clickhouse/config.d/local.xml:/etc/clickhouse-server/config.d/local.xml
     networks: [risk-net]
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]

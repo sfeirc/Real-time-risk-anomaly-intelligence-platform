@@ -32,6 +32,21 @@ def _currency_for(country: str) -> str:
     return _CURRENCY_BY_COUNTRY.get(country, "USD")
 
 
+def _round_price(price: float) -> float:
+    """Decimal precision scaled to price magnitude, like real exchange tick
+    sizes. A flat `round(price, 2)` is fine for BTC but for a $0.14 asset
+    (DOGE) it quantizes ~1% of price per tick — consecutive ticks collapse
+    to the same rounded value, log-returns go to exactly zero, and realized
+    volatility silently reads near-zero regardless of the true underlying
+    vol. Larger assets don't need more precision; smaller ones do.
+    """
+    if price >= 100:
+        return round(price, 2)
+    if price >= 1:
+        return round(price, 4)
+    return round(price, 6)
+
+
 @dataclass
 class MarketEntity:
     spec: MarketSymbolSpec
@@ -75,11 +90,11 @@ class MarketEntity:
         self.seq += 1
         payload = MarketPayload(
             symbol=self.spec.symbol,
-            price=round(self.price, 2),
+            price=_round_price(self.price),
             size=round(size, 6),
             side=side,
-            bid=round(bid, 2),
-            ask=round(ask, 2),
+            bid=_round_price(bid),
+            ask=_round_price(ask),
             exchange_latency_ms=round(latency, 3),
         )
 
