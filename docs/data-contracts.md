@@ -158,6 +158,13 @@ always available, instead of approximate and sometimes not.
 Emitted by `ml-inference` for any window whose ensemble anomaly score crosses
 the `watch` threshold (see `docs/metrics.md` for thresholds).
 
+`alert_id` is a deterministic UUID5 of `(domain, entity_key, window_end)`
+(`services/ml-inference/app/pipeline.py`), not random - reprocessing the
+same window after a crash (see docs/roadmap.md "Kafka semantics") produces
+the *same* `alert_id`, which is what lets `risk.alerts`
+(`ReplacingMergeTree`, see `infra/clickhouse/init/01_schema.sql`) collapse
+a reprocessed window down to one stored alert instead of a duplicate.
+
 ```jsonc
 {
   "alert_id": "uuid",

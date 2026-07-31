@@ -38,16 +38,36 @@ event-time windowing with watermarks (a la Flink/Kafka Streams) so a
 late-arriving event still lands in the correct window instead of the window
 that happened to be open when it arrived.
 
-## Kafka semantics: at-least-once → exactly-once (or idempotent by design)
+## Kafka semantics: at-least-once → idempotent alert writes (done for alerts)
 
-`feature-service` and `ml-inference` use `enable.auto.commit` and don't
-checkpoint in-memory window/detector state. A crash mid-window reprocesses
-a few seconds of data on restart — harmless here since features/alerts
-aren't billing events. A production fraud-blocking system needs either
-Kafka transactions (`exactly_once_v2`) or an idempotent write path (e.g.
-alert dedup keyed on `(entity_key, window_end)`), because "we alerted
-twice" and "we blocked a legitimate transaction twice" are real costs, not
-rounding errors.
+`feature-service` and `ml-inference` still use `enable.auto.commit` and
+don't checkpoint in-memory window/detector state, so a crash mid-window
+still reprocesses a few seconds of data on restart. What's changed:
+`ml-inference` now derives `alert_id` deterministically from
+`(domain, entity_key, window_end)` (`services/ml-inference/app/pipeline.py`)
+instead of a random UUID, and `risk.alerts` is a `ReplacingMergeTree(ts)`
+keyed on that same tuple plus `alert_id`
+(`infra/clickhouse/init/01_schema.sql`) — so a reprocessed window produces
+a row that collapses into the same one at merge time (or immediately under
+`SELECT ... FINAL`), instead of a second, permanently-stored alert for the
+same real-world event. Verified against a live ClickHouse: two inserts with
+the same key produce 2 raw rows until `OPTIMIZE TABLE ... FINAL`, then 1
+(keeping the later `ts`) — see the schema comment and the commit that added
+this for the exact repro.
+
+Not fully closed: this dedups the durable audit trail (`risk.alerts`), not
+every downstream consumer. The materialized rollup views
+(`alerts_rollup_5m`, `probable_cause_rollup_1h`) fire per insert and are
+*not* re-deduplicated by a later merge on the base table, and the live `/ws`
+feed relays whatever `ml-inference` produces to Kafka before any ClickHouse
+merge happens — so a rare reprocessing event can still transiently
+double-count in a dashboard chart or show one alert twice in the live feed
+for a few seconds. `tests/eval/eval_lib.py`'s precision/recall is unaffected
+(it counts *distinct alerted windows*, a set membership test, not alert
+rows). A production fraud-*blocking* system - where a duplicate `block`
+action has a real operational cost, not just a cosmetic one - would still
+want Kafka transactions (`exactly_once_v2`) or a dedup check before acting,
+not just before storing.
 
 ## Unsupervised models: periodic batch refit → true online learning
 

@@ -94,6 +94,26 @@ SETTINGS index_granularity = 8192;
 -- ---------------------------------------------------------------------------
 -- alerts: durable audit trail. Kept much longer than raw_events/features —
 -- this is the table compliance/risk actually cares about historically.
+--
+-- ReplacingMergeTree, not plain MergeTree: ml-inference's Kafka consumer
+-- uses `enable.auto.commit` and doesn't checkpoint in-memory state (see
+-- docs/roadmap.md "Kafka semantics"), so a crash between scoring a window
+-- and the next offset commit reprocesses that window on restart.
+-- ml-inference derives `alert_id` deterministically from
+-- (domain, entity_key, window_end) specifically so a reprocessed window
+-- produces a row with the *same* sort key here, and ReplacingMergeTree(ts)
+-- keeps only the highest-`ts` row per key at merge time - one alert per
+-- window survives, not one per processing attempt.
+--
+-- Known limitation, not hidden: ReplacingMergeTree dedups at background
+-- merge time (or with an explicit `FINAL`/`OPTIMIZE ... FINAL`), not at
+-- insert time - a query between a duplicate insert and the next merge can
+-- still briefly see both rows, and the materialized rollup views in
+-- 02_views.sql fire per-insert and are *not* re-deduplicated by a later
+-- merge on this table. Acceptable here because reprocessing only happens
+-- across an actual crash/restart (rare, not steady-state), and exact counts
+-- that need a guarantee (e.g. tests/eval's precision/recall) should query
+-- with FINAL - see docs/data-contracts.md.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS risk.alerts
 (
@@ -117,9 +137,9 @@ CREATE TABLE IF NOT EXISTS risk.alerts
 
     ingest_date          Date MATERIALIZED toDate(ts)
 )
-ENGINE = MergeTree
+ENGINE = ReplacingMergeTree(ts)
 PARTITION BY ingest_date
-ORDER BY (domain, entity_key, ts)
+ORDER BY (domain, entity_key, window_end, alert_id)
 TTL ingest_date + INTERVAL 365 DAY
 SETTINGS index_granularity = 8192;
 

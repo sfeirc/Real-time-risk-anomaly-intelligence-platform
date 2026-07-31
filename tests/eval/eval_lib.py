@@ -8,6 +8,13 @@ docs/metrics.md — this is the one comparison in the whole project allowed
 to touch it). A "positive" is a features window with at least one labeled
 raw event inside [window_start, window_end); a "detection" is that same
 window producing a row in risk.alerts.
+
+`Window.alerted` is membership in a (entity_key, window_end) set
+(see run_eval.py), not a row count - a reprocessed window that transiently
+produced two physical rows in risk.alerts (same alert_id, deduplicated by
+ReplacingMergeTree at merge time, see infra/clickhouse/init/01_schema.sql)
+still counts as exactly one alerted window here, by construction, with no
+FINAL needed on the read side.
 """
 
 from __future__ import annotations

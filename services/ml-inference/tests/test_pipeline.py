@@ -1,7 +1,7 @@
 import random
 
 from app.config import Settings
-from app.pipeline import MLPipeline
+from app.pipeline import MLPipeline, _alert_id
 from app.schemas import FeatureEvent
 
 
@@ -92,6 +92,43 @@ def test_xgboost_absent_when_no_model_artifact():
     pipeline = MLPipeline(fast_settings())
     assert not pipeline.xgboost_detectors["market"].ready
     assert not pipeline.xgboost_detectors["payments"].ready
+
+
+def test_alert_id_is_deterministic_for_the_same_window():
+    # Same (domain, entity_key, window_end) must always produce the same
+    # alert_id - this is what makes a reprocessed window (see
+    # docs/roadmap.md "Kafka semantics") idempotent in risk.alerts instead
+    # of a second, permanently-stored duplicate alert.
+    a = _alert_id("market", "BTC-USD", "2026-01-01T00:00:02+00:00")
+    b = _alert_id("market", "BTC-USD", "2026-01-01T00:00:02+00:00")
+    assert a == b
+
+
+def test_alert_id_differs_across_domain_entity_or_window():
+    base = _alert_id("market", "BTC-USD", "2026-01-01T00:00:02+00:00")
+    assert base != _alert_id("payments", "BTC-USD", "2026-01-01T00:00:02+00:00")
+    assert base != _alert_id("market", "ETH-USD", "2026-01-01T00:00:02+00:00")
+    assert base != _alert_id("market", "BTC-USD", "2026-01-01T00:00:04+00:00")
+
+
+def test_reprocessing_the_same_window_on_a_fresh_pipeline_yields_the_same_alert_id():
+    # Simulates the actual crash-restart scenario: a brand new MLPipeline
+    # (no carried-over in-memory state, exactly what happens on process
+    # restart) scores the same window twice and must produce the same
+    # alert_id both times, not just the same helper output in isolation.
+    def run_to_alert(seed: int):
+        pipeline = MLPipeline(fast_settings())
+        rng = random.Random(seed)
+        for _ in range(60):
+            f = make_feature_event(zscore=rng.gauss(0, 0.3), realized_vol=0.5 + rng.gauss(0, 0.02))
+            pipeline.process(f)
+        return pipeline.process(make_feature_event(zscore=8.0, realized_vol=5.0, window_end="2026-01-01T00:05:00+00:00"))
+
+    first_attempt = run_to_alert(seed=42)
+    second_attempt = run_to_alert(seed=42)  # same seed: reproduces the identical warmup + spike sequence
+    assert first_attempt is not None
+    assert second_attempt is not None
+    assert first_attempt.alert_id == second_attempt.alert_id
 
 
 def test_drift_metrics_available_after_warmup():

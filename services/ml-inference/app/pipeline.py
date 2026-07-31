@@ -38,6 +38,26 @@ log = logging.getLogger("ml-inference.pipeline")
 
 DOMAINS = ("market", "payments")
 
+# Fixed, arbitrary namespace for deriving alert_id deterministically (any
+# uuid4 works here - it just needs to never change once chosen, since
+# changing it would change every alert_id this service has ever produced).
+_ALERT_ID_NAMESPACE = uuid.UUID("7c6f1a9e-2b3d-4f5c-8a1e-9d6b4c2f0e7a")
+
+
+def _alert_id(domain: str, entity_key: str, window_end: str) -> uuid.UUID:
+    """Deterministic, not random: `enable.auto.commit` (see
+    docs/roadmap.md "Kafka semantics") means a crash between scoring a
+    window and the next offset commit reprocesses that window on restart.
+    A random alert_id would turn that into a second, permanently-stored
+    alert for the same window; deriving it from the window's own identity
+    instead makes reprocessing produce the *same* alert_id both times, which
+    is what makes `risk.alerts` idempotent under ReplacingMergeTree (see
+    infra/clickhouse/init/01_schema.sql) - the natural key is
+    (domain, entity_key, window_end), not model_version, because the same
+    window scored again is still the same real-world event even if the
+    model happened to change in between."""
+    return uuid.uuid5(_ALERT_ID_NAMESPACE, f"{domain}|{entity_key}|{window_end}")
+
 
 class _DomainMetricsAccumulator:
     def __init__(self) -> None:
@@ -142,7 +162,7 @@ class MLPipeline:
         latency_ms = (now - window_start_dt).total_seconds() * 1000.0
 
         return AlertEvent(
-            alert_id=uuid.uuid4(),
+            alert_id=_alert_id(domain, f.entity_key, f.window_end),
             entity_key=f.entity_key,
             domain=domain,
             ts=now.isoformat(),
