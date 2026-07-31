@@ -12,7 +12,18 @@ and can be queried historically from the dashboard.
 | `ingestion_ws_to_kafka_ms` | ingestion | time from WS frame receipt to Kafka produce ack |
 | `feature_window_emit_lag_ms` | feature-service | `now - window_end` at the moment a feature event is produced |
 | `ml_inference_ms` | ml-inference | time from Kafka feature-event consume to alert produce (ensemble scoring + explanation) |
-| `latency_ingest_to_alert_ms` | ml-inference (in `alerts` payload) | `alert.ts - raw_event.ts_event` — **headline end-to-end metric** |
+| `latency_ingest_to_alert_ms` | ml-inference (in `alerts` payload) | `alert.ts - feature.window_start` — **headline end-to-end metric**, see docs/data-contracts.md for why `window_start` rather than the raw event's own timestamp |
+
+**Known, bounded latency spike:** the Isolation Forest / autoencoder are
+periodically batch-retrained (every `retrain_every_n_windows` windows, see
+`app/config.py`), and the one `process()` call that triggers a retrain takes
+as long as that retrain does — measured ~500-900ms locally, well above the
+steady-state p50 (~1-2ms). `pipeline.process()` runs on a single dedicated
+executor thread (`app/main.py`), not inline on the asyncio event loop, so a
+retrain stalls only that one message's own latency, not Kafka consumption,
+`/health`, `/metrics`, or the other background loops. The 50ms p99 target in
+`ARCHITECTURE.md` describes steady-state scoring, not retrain windows —
+noted as a known, accepted tradeoff rather than hidden in the average.
 
 All four are recorded as Prometheus histograms; p50/p95/p99 are what the
 dashboard's "System Metrics" panel plots. Targets are in `ARCHITECTURE.md`

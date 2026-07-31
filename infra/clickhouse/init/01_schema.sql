@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS risk.features
 (
     entity_key          String,
     domain              LowCardinality(String),
+    window_start         DateTime64(3, 'UTC'),
     window_end          DateTime64(3, 'UTC'),
     window_size_s        Float64,
     count               UInt64,

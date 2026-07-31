@@ -1,0 +1,50 @@
+# Anomaly score -> severity -> action. Deliberately data, not code: this is
+# the layer risk/compliance owns in practice, and it changes far more often
+# than detection logic — see ARCHITECTURE.md's rules-engine rationale.
+# Evaluated top-to-bottom per domain; first matching (min_score <= score)
+# threshold wins. `default` applies to any domain without its own block.
+
+default:
+  thresholds:
+    - min_score: 0.90
+      severity: critical
+      action: block
+    - min_score: 0.75
+      severity: alert
+      action: alert
+    - min_score: 0.55
+      severity: watch
+      action: watch
+
+domains:
+  payments:
+    # Fraud gets a slightly lower bar to `block`: a false-positive block is
+    # a declined transaction (recoverable), a false negative is fraud losses
+    # (not) — the cost asymmetry justifies being trigger-happier here than
+    # on the market side.
+    thresholds:
+      - min_score: 0.85
+        severity: critical
+        action: block
+      - min_score: 0.70
+        severity: alert
+        action: alert
+      - min_score: 0.50
+        severity: watch
+        action: watch
+
+  market:
+    # Market microstructure "block" has no real downstream action in this
+    # demo (there's no order to reject) — kept as `alert` at the top end so
+    # `critical` severity still shows up distinctly on the dashboard without
+    # implying we can actually halt trading.
+    thresholds:
+      - min_score: 0.90
+        severity: critical
+        action: alert
+      - min_score: 0.75
+        severity: alert
+        action: alert
+      - min_score: 0.55
+        severity: watch
+        action: watch

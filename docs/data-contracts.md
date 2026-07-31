@@ -84,6 +84,7 @@ downstream detectors need — no service re-reads `raw-events`.
 {
   "entity_key": "string",
   "domain": "market" | "payments",
+  "window_start": "RFC3339",         // wall-clock time this window opened; see latency note below
   "window_end": "RFC3339",
   "window_size_s": "float64",
   "count": "uint64",
@@ -117,6 +118,13 @@ downstream detectors need — no service re-reads `raw-events`.
 `primary_metric` exists so the statistical detectors have one well-defined
 signal per domain instead of guessing which of a dozen fields matters.
 
+`window_start` is what the headline `latency_ingest_to_alert_ms` metric is
+measured from (see below) — `ml-inference` never sees individual raw events,
+only windowed features, so "ingestion to alert" is defined as window-open to
+alert-emit rather than first-tick to alert-emit. That slightly overstates
+true detection latency (by up to one `window_size_s`) but is exact and
+always available, instead of approximate and sometimes not.
+
 ## 3. Alert event (`alerts`)
 
 Emitted by `ml-inference` for any window whose ensemble anomaly score crosses
@@ -149,7 +157,7 @@ the `watch` threshold (see `docs/metrics.md` for thresholds).
   },
   "model_version": "string",
   "drift_flag": "bool",
-  "latency_ingest_to_alert_ms": "float64"  // ts - raw event ts_event, the headline latency metric
+  "latency_ingest_to_alert_ms": "float64"  // ts - feature.window_start, the headline latency metric
 }
 ```
 

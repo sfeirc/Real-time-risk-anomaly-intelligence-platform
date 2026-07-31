@@ -13,7 +13,7 @@ scrape_configs:
 
   - job_name: ml-inference
     static_configs:
-      - targets: ["ml-inference:9103"]
+      - targets: ["ml-inference:8000"]
 
   - job_name: api-gateway
     static_configs:

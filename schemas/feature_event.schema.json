@@ -4,13 +4,14 @@
   "title": "FeatureEvent",
   "type": "object",
   "required": [
-    "entity_key", "domain", "window_end", "window_size_s", "count", "throughput_eps",
+    "entity_key", "domain", "window_start", "window_end", "window_size_s", "count", "throughput_eps",
     "latency_p50_ms", "latency_p99_ms", "error_rate",
     "ewma_mean", "ewma_var", "zscore", "primary_metric"
   ],
   "properties": {
     "entity_key": { "type": "string" },
     "domain": { "type": "string", "enum": ["market", "payments"] },
+    "window_start": { "type": "string", "format": "date-time" },
     "window_end": { "type": "string", "format": "date-time" },
     "window_size_s": { "type": "number" },
     "count": { "type": "integer", "minimum": 0 },

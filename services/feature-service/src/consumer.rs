@@ -1,10 +1,11 @@
 //! Orchestrates the whole pipeline stage on a single async task:
 //! Kafka-consume raw events into per-entity windows, sweep for windows past
-//! their deadline, produce `FeatureEvent`s to Kafka, and batch-insert into
-//! ClickHouse. A single task (via `tokio::select!`) avoids putting the
-//! entity-window `HashMap` behind a `Mutex` — at this event rate the
-//! bottleneck is I/O (Kafka, ClickHouse HTTP), not CPU, so there's nothing
-//! to gain from spreading windows across worker threads.
+//! their deadline, produce `FeatureEvent`s to Kafka, and batch-insert both
+//! `features` and a flattened copy of every raw event into ClickHouse. A
+//! single task (via `tokio::select!`) avoids putting the entity-window
+//! `HashMap` behind a `Mutex` — at this event rate the bottleneck is I/O
+//! (Kafka, ClickHouse HTTP), not CPU, so there's nothing to gain from
+//! spreading windows across worker threads.
 //!
 //! Offset commits are `enable.auto.commit` (at-least-once): the in-memory
 //! window state isn't checkpointed either, so manual commit-after-flush
@@ -56,7 +57,8 @@ pub async fn run(cfg: &Config, metrics: Arc<Metrics>) {
         cfg.clickhouse_user.clone(),
         cfg.clickhouse_password.clone(),
     );
-    let mut ch_batch: Vec<FeatureEvent> = Vec::new();
+    let mut features_batch: Vec<FeatureEvent> = Vec::new();
+    let mut raw_events_batch: Vec<RawEvent> = Vec::new();
 
     let mut windows: HashMap<String, EntityWindow> = HashMap::new();
 
@@ -79,26 +81,36 @@ pub async fn run(cfg: &Config, metrics: Arc<Metrics>) {
                 match msg {
                     Ok(m) => {
                         if let Some(payload) = m.payload() {
-                            handle_raw_event(payload, cfg, &mut windows, &metrics);
+                            handle_raw_event(payload, cfg, &mut windows, &mut raw_events_batch, &metrics);
                         }
                     }
                     Err(e) => tracing::warn!(error = %e, "kafka consume error"),
                 }
             }
             _ = sweep_interval.tick() => {
-                sweep_and_emit(&mut windows, &producer, cfg, &metrics, &mut ch_batch).await;
-                if ch_batch.len() >= cfg.clickhouse_batch_size {
-                    flush_clickhouse(&ch_sink, &mut ch_batch, &metrics).await;
+                sweep_and_emit(&mut windows, &producer, cfg, &metrics, &mut features_batch).await;
+                if features_batch.len() >= cfg.clickhouse_batch_size {
+                    flush_features(&ch_sink, &mut features_batch, &metrics).await;
+                }
+                if raw_events_batch.len() >= cfg.clickhouse_batch_size {
+                    flush_raw_events(&ch_sink, &mut raw_events_batch, &metrics).await;
                 }
             }
             _ = ch_flush_interval.tick() => {
-                flush_clickhouse(&ch_sink, &mut ch_batch, &metrics).await;
+                flush_features(&ch_sink, &mut features_batch, &metrics).await;
+                flush_raw_events(&ch_sink, &mut raw_events_batch, &metrics).await;
             }
         }
     }
 }
 
-fn handle_raw_event(payload: &[u8], cfg: &Config, windows: &mut HashMap<String, EntityWindow>, metrics: &Metrics) {
+fn handle_raw_event(
+    payload: &[u8],
+    cfg: &Config,
+    windows: &mut HashMap<String, EntityWindow>,
+    raw_events_batch: &mut Vec<RawEvent>,
+    metrics: &Metrics,
+) {
     let event: RawEvent = match serde_json::from_slice(payload) {
         Ok(e) => e,
         Err(e) => {
@@ -117,6 +129,8 @@ fn handle_raw_event(payload: &[u8], cfg: &Config, windows: &mut HashMap<String, 
         .entry(event.entity_key.clone())
         .or_insert_with(|| EntityWindow::new(event.domain, window_size_s, cfg.ewma_alpha, Utc::now()));
     window.add(&event);
+
+    raw_events_batch.push(event);
 }
 
 async fn sweep_and_emit(
@@ -155,17 +169,32 @@ async fn sweep_and_emit(
     }
 }
 
-async fn flush_clickhouse(sink: &ClickHouseSink, batch: &mut Vec<FeatureEvent>, metrics: &Metrics) {
+async fn flush_features(sink: &ClickHouseSink, batch: &mut Vec<FeatureEvent>, metrics: &Metrics) {
     if batch.is_empty() {
         return;
     }
     let rows = std::mem::take(batch);
     let n = rows.len();
     match sink.insert_features(&rows).await {
-        Ok(()) => metrics.clickhouse_rows_written_total.inc_by(n as u64),
+        Ok(()) => metrics.clickhouse_rows_written_total.with_label_values(&["features"]).inc_by(n as u64),
         Err(e) => {
-            metrics.clickhouse_write_errors_total.inc();
-            tracing::warn!(error = %e, rows = n, "clickhouse batch insert failed, dropping batch");
+            metrics.clickhouse_write_errors_total.with_label_values(&["features"]).inc();
+            tracing::warn!(error = %e, rows = n, "clickhouse features batch insert failed, dropping batch");
+        }
+    }
+}
+
+async fn flush_raw_events(sink: &ClickHouseSink, batch: &mut Vec<RawEvent>, metrics: &Metrics) {
+    if batch.is_empty() {
+        return;
+    }
+    let rows = std::mem::take(batch);
+    let n = rows.len();
+    match sink.insert_raw_events(&rows).await {
+        Ok(()) => metrics.clickhouse_rows_written_total.with_label_values(&["raw_events"]).inc_by(n as u64),
+        Err(e) => {
+            metrics.clickhouse_write_errors_total.with_label_values(&["raw_events"]).inc();
+            tracing::warn!(error = %e, rows = n, "clickhouse raw_events batch insert failed, dropping batch");
         }
     }
 }

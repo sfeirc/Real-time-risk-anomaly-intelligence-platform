@@ -101,6 +101,7 @@ pub struct RawEvent {
 pub struct FeatureEvent {
     pub entity_key: String,
     pub domain: Domain,
+    pub window_start: String,
     pub window_end: String,
     pub window_size_s: f64,
     pub count: u64,

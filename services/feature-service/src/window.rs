@@ -123,7 +123,8 @@ impl EntityWindow {
     /// would just inject a fake zero-activity sample into that entity's
     /// EWMA baseline.
     pub fn flush(&mut self) -> Option<FeatureEvent> {
-        let window_end = self.window_start + chrono::Duration::milliseconds((self.window_size_s * 1000.0) as i64);
+        let window_start = self.window_start;
+        let window_end = window_start + chrono::Duration::milliseconds((self.window_size_s * 1000.0) as i64);
         self.window_start = window_end;
 
         if self.count == 0 {
@@ -186,6 +187,7 @@ impl EntityWindow {
         Some(FeatureEvent {
             entity_key: String::new(), // filled in by the caller, which owns the key
             domain: self.domain,
+            window_start: window_start.to_rfc3339(),
             window_end: window_end.to_rfc3339(),
             window_size_s: self.window_size_s,
             count,

@@ -20,12 +20,12 @@ dist/
 .vite/
 *.local
 
-# ML artifacts
+# ML artifacts — trained model binaries are pipeline output, not source;
+# regenerate with services/ml-inference/scripts/train_xgboost.py.
 *.onnx
 *.pt
 *.pkl
-models/artifacts/
-!services/ml-inference/app/models/**/*.py
+**/models/artifacts/
 
 # Data
 *.parquet
