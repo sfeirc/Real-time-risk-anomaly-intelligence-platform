@@ -128,13 +128,58 @@ metrics across every service. Each fix is explained in its commit message —
 
 ## Measured results
 
-See `docs/benchmarks/latest.json` for the full machine-readable report
-(regenerate with `python tests/eval/run_eval.py` and
-`python scripts/load_test.py` against a running stack). Summary as last
-measured:
+Full machine-readable report: `docs/benchmarks/latest.json`. Regenerate with
+`make eval` (detection quality) and `make load-test` (throughput/latency/
+resources) against a running stack (`make up`). Last measured against a
+~22-minute clean run with the recalibrated ~7%-duty-cycle anomaly rate (see
+`services/data-generator/app/config.py`):
 
-<!-- BENCHMARKS_TABLE_START -->
-_Run `make eval` and `make load-test` against a live stack to populate this
-section — see `docs/benchmarks/latest.json` for the underlying data used to
-fill it in._
-<!-- BENCHMARKS_TABLE_END -->
+**Detection quality** (`tests/eval/run_eval.py`, 5,033 feature windows, ground
+truth = data-generator's injected `scenario_label`, never seen by ml-inference):
+
+| | value |
+|---|---|
+| Precision | 0.50 (32 TP / 64 flagged) |
+| Recall (window-level) | 0.11 |
+| F1 | 0.18 |
+| False positive rate | 0.007 (32 FP / 4,741 normal windows) |
+
+| Scenario | Episodes | Episodes detected | Detection rate | Mean delay |
+|---|---|---|---|---|
+| fraud_pattern | 4 | 4 | 100% | 20.0s |
+| volatility_spike | 1 | 1 | 100% | 10.0s |
+| data_corruption | 14 | 7 | 50% | 15.6s |
+| regime_change | 5 | 2 | 40% | 11.5s |
+| latency_incident | 4 | 0 | 0% | — |
+| volume_spike | 1 | 0 | 0% | — |
+
+Read this as a first honest measurement, not a final scorecard: window-level
+recall (0.11) is structurally lower than episode-level detection rate — an
+adaptive EWMA baseline is *supposed* to stop alerting once it's learned a
+sustained shift as the new normal, so most of a multi-window episode reads
+"normal" once caught, by design (see `docs/metrics.md`). Episode counts per
+scenario are small (1-14) in a 22-minute window, so per-scenario rates —
+especially the two 0%-of-1 and 0%-of-4 results — are noisy, not yet a
+reliable signal that those scenario types are structurally harder to catch;
+a longer run is the obvious next step before reading anything into that
+gap. The false-positive rate (0.7%) is the number this ensemble was
+explicitly weighted toward keeping low (see `ARCHITECTURE.md`'s rules-engine
+rationale), and it held.
+
+**Throughput & latency** (`scripts/load_test.py`, 60s window):
+
+| | value |
+|---|---|
+| Sustained ingest rate | 193 events/s |
+| Feature windows emitted | 4.1/s |
+| Alerts produced | 0.13/s |
+| Ingestion → Kafka (p99) | 9.95 ms |
+| Feature window emit lag (p99) | 48.9 ms |
+| ML ensemble scoring (p99) | 174 ms |
+| Ingest → alert, end to end (p50 / p99) | 2.0s / 5.0s |
+
+**Resource cost** (`docker stats`, same window): ingestion 2.2% CPU / 7MB,
+feature-service 2.4% CPU / 31MB, ml-inference 0.2% CPU / 339MB (PyTorch +
+scikit-learn loaded), api-gateway 0.2% CPU / 49MB, ClickHouse 4.7% CPU /
+985MB, Redpanda 4.2% CPU / 670MB — on a single developer workstation, no
+tuning applied.

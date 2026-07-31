@@ -1,0 +1,105 @@
+{
+  "generated_at": "2026-07-31T08:36:41.173246Z",
+  "eval_window_hours": 6.0,
+  "windows_evaluated": 5033,
+  "overall": {
+    "precision": 0.5,
+    "recall": 0.1095890410958904,
+    "f1": 0.1797752808988764,
+    "false_positive_rate": 0.006749630879561274,
+    "tp": 32,
+    "fp": 32,
+    "fn": 260,
+    "tn": 4709
+  },
+  "by_scenario": {
+    "data_corruption": {
+      "episodes": 14,
+      "episodes_detected": 7,
+      "episode_detection_rate": 0.5,
+      "window_recall": 0.16161616161616163,
+      "mean_detection_delay_s": 15.571428571428571
+    },
+    "volatility_spike": {
+      "episodes": 1,
+      "episodes_detected": 1,
+      "episode_detection_rate": 1.0,
+      "window_recall": 0.18181818181818182,
+      "mean_detection_delay_s": 10.0
+    },
+    "regime_change": {
+      "episodes": 5,
+      "episodes_detected": 2,
+      "episode_detection_rate": 0.4,
+      "window_recall": 0.03125,
+      "mean_detection_delay_s": 11.5
+    },
+    "latency_incident": {
+      "episodes": 4,
+      "episodes_detected": 0,
+      "episode_detection_rate": 0.0,
+      "window_recall": 0.0,
+      "mean_detection_delay_s": null
+    },
+    "fraud_pattern": {
+      "episodes": 4,
+      "episodes_detected": 4,
+      "episode_detection_rate": 1.0,
+      "window_recall": 0.4074074074074074,
+      "mean_detection_delay_s": 20.0
+    },
+    "volume_spike": {
+      "episodes": 1,
+      "episodes_detected": 0,
+      "episode_detection_rate": 0.0,
+      "window_recall": 0.0,
+      "mean_detection_delay_s": null
+    }
+  },
+  "load_test": {
+    "generated_at": "2026-07-31T08:38:36.912843+00:00",
+    "duration_s": 60,
+    "throughput": {
+      "raw_events_per_s": 193.43333333333334,
+      "features_per_s": 4.1,
+      "alerts_per_s": 0.13333333333333333
+    },
+    "latency_ingest_to_alert_ms": {
+      "p50": 2043.8645000000001,
+      "p95": 5034.12075,
+      "p99": 5034.20335,
+      "n": 8
+    },
+    "hop_latency_p99_ms": {
+      "ingestion_ws_to_kafka_ms": 9.95,
+      "feature_window_emit_lag_ms": 48.881230769230775,
+      "ml_inference_ms": 174.25000000000074
+    },
+    "container_resources": {
+      "api-gateway": {
+        "cpu_percent": "0.24%",
+        "memory": "48.68MiB / 30.26GiB"
+      },
+      "ingestion": {
+        "cpu_percent": "2.23%",
+        "memory": "6.801MiB / 30.26GiB"
+      },
+      "ml-inference": {
+        "cpu_percent": "0.18%",
+        "memory": "338.5MiB / 30.26GiB"
+      },
+      "feature-service": {
+        "cpu_percent": "2.38%",
+        "memory": "31.32MiB / 30.26GiB"
+      },
+      "clickhouse": {
+        "cpu_percent": "4.72%",
+        "memory": "985MiB / 30.26GiB"
+      },
+      "redpanda": {
+        "cpu_percent": "4.23%",
+        "memory": "669.9MiB / 30.26GiB"
+      }
+    }
+  }
+}
