@@ -138,6 +138,16 @@ than `data-generator` (which exists to produce a *realistic*, scenario-
 labeled stream for detection-quality evaluation, not raw throughput), not a
 fix to this one.
 
+## Security: no scanning → recurring dependency audit in CI (done for dependencies)
+
+`.github/workflows/ci.yml`'s `security-audit` job runs `cargo-audit`,
+`pip-audit`, and `npm audit` against every dependency set on every push -
+see `docs/security.md` for what it found (real CVEs in `PyJWT==2.10.1`,
+assessed and fixed) and, just as importantly, what it doesn't cover:
+container/OS-level image scanning, SAST, secrets-in-git-history scanning,
+and any actual penetration testing. Those all remain open, same as the
+mTLS/per-operator-identity/clustering gaps below.
+
 ## Rules engine: YAML file → owned, audited config service
 
 `services/ml-inference/app/rules.yaml` is read at process start (plus

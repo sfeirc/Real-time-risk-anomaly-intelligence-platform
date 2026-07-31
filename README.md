@@ -156,6 +156,12 @@ Every service was built and run for real during development — this isn't a
   staying low across every container even at a 2,000/s target — that
   neither fix was the actual constraint, and reporting the ceiling honestly
   as unresolved-in-full rather than claiming a fix that didn't work.
+- **Security audit**: `cargo-audit`/`pip-audit`/`npm audit` run for real
+  against every service, not just added to CI untested. Found genuine CVEs
+  in `PyJWT==2.10.1` (the library securing the operator JWT flow), assessed
+  which applied to this project's specific HS256-only, no-remote-keys usage
+  (most didn't), upgraded to `2.13.0` anyway, and re-verified the whole auth
+  flow end to end against the live stack afterward. See `docs/security.md`.
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that
@@ -173,6 +179,7 @@ metrics across every service. Each fix is explained in its commit message —
 - [`docs/metrics.md`](docs/metrics.md) — every exposed metric, how it's computed, thresholds
 - [`docs/runbook.md`](docs/runbook.md) — operating the local deployment, troubleshooting
 - [`docs/roadmap.md`](docs/roadmap.md) — every deliberate scope cut, and what replaces it at real production scale
+- [`docs/security.md`](docs/security.md) — dependency vulnerability scanning (recurring in CI), what it found, and what it doesn't cover
 
 ## Measured results
 

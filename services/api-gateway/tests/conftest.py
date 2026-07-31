@@ -62,7 +62,11 @@ def auth_settings(monkeypatch):
     """Deterministic operator credentials for tests that need to exercise
     the auth boundary, instead of whatever happens to be in the environment."""
     monkeypatch.setattr(settings, "api_gateway_operator_api_key", "test-operator-key")
-    monkeypatch.setattr(settings, "api_gateway_jwt_secret", "test-jwt-signing-secret")
+    # >= 32 bytes: PyJWT 2.13+ warns below RFC 7518's recommended HMAC key
+    # length for HS256 (see pip-audit's PYSEC-2025-183 finding) - keeping
+    # test fixtures realistic avoids that warning without changing anything
+    # about what's actually being tested.
+    monkeypatch.setattr(settings, "api_gateway_jwt_secret", "test-jwt-signing-secret-that-is-long-enough")
     return settings
 
 

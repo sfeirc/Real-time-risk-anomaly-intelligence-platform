@@ -124,3 +124,51 @@ jobs:
       - run: python scripts/schema_registry.py check-all --url http://localhost:8081
       - name: Prove BACKWARD compatibility actually rejects a breaking change
         run: python scripts/schema_registry.py self-test --url http://localhost:8081
+
+  security-audit:
+    # Dependency vulnerability scanning on every PR, not a one-off manual
+    # check - this is what actually caught PyJWT 2.10.1's real CVEs (fixed
+    # in 2.13.0) during development; without a recurring job, the next
+    # dependency bump could silently reintroduce something just as real.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            services/ingestion
+            services/feature-service
+      - run: cargo install cargo-audit --locked
+      - name: Audit ingestion (Rust)
+        run: cargo audit
+        working-directory: services/ingestion
+      - name: Audit feature-service (Rust)
+        run: cargo audit
+        working-directory: services/feature-service
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - name: Audit api-gateway (Python)
+        run: pip-audit -r requirements.txt
+        working-directory: services/api-gateway
+      - name: Audit ml-inference (Python)
+        # torch's +cpu wheel isn't on PyPI proper (see requirements.txt's
+        # --extra-index-url), so pip-audit can't resolve that one exact
+        # version string and prints it as a skip - verified this doesn't
+        # affect the exit code (pip-audit only fails on an actual finding
+        # among the packages it *could* resolve, not on an unresolvable one).
+        run: pip-audit -r requirements.txt
+        working-directory: services/ml-inference
+      - name: Audit data-generator (Python)
+        run: pip-audit -r requirements.txt
+        working-directory: services/data-generator
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: services/dashboard/package-lock.json
+      - name: Audit dashboard (npm)
+        run: npm audit --audit-level=high
+        working-directory: services/dashboard

@@ -77,7 +77,7 @@ def test_protected_endpoint_rejects_token_signed_with_wrong_secret(protected_cli
     now = int(time.time())
     forged = jwt.encode(
         {"sub": "operator", "role": "operator", "iat": now, "exp": now + 3600},
-        "not-the-real-secret",
+        "not-the-real-secret-but-still-long-enough-to-avoid-a-warning",
         algorithm=JWT_ALGORITHM,
     )
     resp = protected_client.get("/protected", headers={"Authorization": f"Bearer {forged}"})
