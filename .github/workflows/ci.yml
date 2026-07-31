@@ -94,3 +94,33 @@ jobs:
                   failed = True
           sys.exit(1 if failed else 0)
           "
+
+  schema-registry:
+    # Proves BACKWARD-compatibility enforcement against a real schema
+    # registry on every PR, not just that scripts/schema_registry.py runs -
+    # see the script's docstring and docs/data-contracts.md. A GitHub Actions
+    # `services:` container can't override Redpanda's default command, so
+    # this starts it directly with `docker run` instead (same flags the
+    # schema registry needs as docker-compose's `redpanda` service).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install httpx
+      - name: Start a single-node Redpanda with schema registry enabled
+        run: |
+          docker run -d --name redpanda -p 8081:8081 \
+            redpandadata/redpanda:v24.2.18 \
+            redpanda start --schema-registry-addr 0.0.0.0:8081 --kafka-addr 0.0.0.0:9092 \
+              --rpc-addr 0.0.0.0:33145 --mode dev-container --smp 1 --memory 1G --default-log-level=warn
+          for i in $(seq 1 30); do
+            docker exec redpanda rpk cluster health 2>/dev/null | grep -q 'Healthy:.*true' && exit 0
+            sleep 2
+          done
+          echo "redpanda did not become healthy in time" && docker logs redpanda && exit 1
+      - run: python scripts/schema_registry.py register-all --url http://localhost:8081
+      - run: python scripts/schema_registry.py check-all --url http://localhost:8081
+      - name: Prove BACKWARD compatibility actually rejects a breaking change
+        run: python scripts/schema_registry.py self-test --url http://localhost:8081

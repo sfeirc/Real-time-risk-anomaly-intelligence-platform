@@ -76,6 +76,27 @@ services:
        rpk topic create alerts          --partitions 6 --replicas 1 --brokers redpanda:9092 || true &&
        rpk topic create model-metrics    --partitions 1 --replicas 1 --brokers redpanda:9092 || true"
 
+  schema-registry-init:
+    # Registers schemas/*.schema.json with Redpanda's schema registry and
+    # sets BACKWARD compatibility on each subject - see
+    # scripts/schema_registry.py and docs/data-contracts.md. Idempotent
+    # (registering an identical schema is a no-op), so safe on every `up`.
+    image: python:3.12-slim
+    container_name: schema-registry-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    networks: [risk-net]
+    volumes:
+      - ./schemas:/work/schemas:ro
+      - ./scripts/schema_registry.py:/work/scripts/schema_registry.py:ro
+    working_dir: /work
+    environment:
+      SCHEMA_REGISTRY_URL: http://redpanda:8081
+    entrypoint: ["/bin/bash", "-c"]
+    command: >
+      "pip install -q httpx && python scripts/schema_registry.py register-all"
+
   # ---------------------------------------------------------------------
   # Storage
   # ---------------------------------------------------------------------

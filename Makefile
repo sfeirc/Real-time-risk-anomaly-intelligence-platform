@@ -1,14 +1,15 @@
 .PHONY: infra-up infra-down up down build logs ps clean \
         setup test test-rust test-python test-js \
         lint fmt \
-        eval load-test demo
+        eval load-test demo \
+        schema-register schema-check schema-self-test
 
 COMPOSE := docker compose
 PY_SERVICES := ml-inference api-gateway data-generator
 
 ## Bring up only the infra layer (Redpanda, ClickHouse, Prometheus, Grafana)
 infra-up:
-	$(COMPOSE) up -d redpanda redpanda-console redpanda-topics-init clickhouse prometheus grafana
+	$(COMPOSE) up -d redpanda redpanda-console redpanda-topics-init schema-registry-init clickhouse prometheus grafana
 
 infra-down:
 	$(COMPOSE) stop redpanda redpanda-console clickhouse prometheus grafana
@@ -93,3 +94,17 @@ load-test:
 
 demo:
 	bash scripts/demo.sh
+
+## --- Schema registry --------------------------------------------------------
+## Against the locally running stack's external port (18081); the compose
+## service `schema-registry-init` runs the same register-all internally on
+## every `make up` / `make infra-up`. See scripts/schema_registry.py.
+
+schema-register:
+	cd tests/integration && .venv/bin/python ../../scripts/schema_registry.py register-all
+
+schema-check:
+	cd tests/integration && .venv/bin/python ../../scripts/schema_registry.py check-all
+
+schema-self-test:
+	cd tests/integration && .venv/bin/python ../../scripts/schema_registry.py self-test

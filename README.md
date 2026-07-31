@@ -108,6 +108,14 @@ Every service was built and run for real during development — this isn't a
   backlog + live push confirmed.
 - **Grafana**: datasource health-checked programmatically; dashboard
   screenshotted against live Prometheus data.
+- **Auth**: the operator JWT flow (`POST /auth/token` → `Authorization:
+  Bearer` on `POST /api/scenarios/inject`) was exercised end-to-end against
+  the live containers — wrong key, correct key, unauthenticated request,
+  and the dashboard's own "Unlock" gate, in a real browser (Playwright).
+- **Schema registry**: `scripts/schema_registry.py` was run against a real
+  Redpanda schema registry, not just written — including a self-test that
+  registers a deliberately-incompatible schema change and confirms the
+  registry actually rejects it (and accepts a genuinely compatible one).
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that

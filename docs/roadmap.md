@@ -8,14 +8,25 @@ with what replaces each one at real multi-team production scale, so the
 gap between "working demo" and "production system" is explicit rather than
 implied.
 
-## Data contracts: hand-maintained doc → schema registry
+## Data contracts: hand-maintained doc → schema registry (done)
 
-`docs/data-contracts.md` + `schemas/*.schema.json`, checked in CI
-(`tests/integration/test_contracts.py`), catch contract drift between
-services today. At real scale, with multiple teams independently deploying
-producers/consumers, this becomes a **schema registry** (Confluent Schema
-Registry, Avro/Protobuf with compatibility modes) so a breaking change is
-rejected at publish time, not caught by a CI job that runs after the fact.
+`schemas/*.schema.json` are now registered with Redpanda's schema registry
+(`scripts/schema_registry.py`) under BACKWARD compatibility, enforced by a
+dedicated CI job (`.github/workflows/ci.yml`'s `schema-registry`) that spins
+up a real Redpanda container and proves the registry actually rejects a
+breaking change and accepts a compatible one — not just that registration
+succeeds. See `docs/data-contracts.md` for the subject list and the one
+known gap (Redpanda's JSON Schema compatibility checker doesn't yet resolve
+`$ref`, which degrades `raw-events-value`'s check to a warning).
+
+What's still not here: the registry governs compatibility, but messages
+stay plain JSON rather than the Confluent wire-format envelope (magic byte +
+schema ID) real Avro/Protobuf deployments use — a deliberate call (see
+`ARCHITECTURE.md`), not a gap, at this message size and team size. A real
+multi-team deployment with many independent producer teams would likely
+want the wire-format envelope too, so a consumer can decode against the
+exact schema ID a message was written with instead of assuming "whatever's
+currently registered."
 
 ## Windowing: processing-time → event-time with watermarks
 

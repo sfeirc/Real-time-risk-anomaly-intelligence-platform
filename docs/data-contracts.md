@@ -2,9 +2,37 @@
 
 Canonical event schemas shared by every service. Rust (`serde`), Python (`pydantic`)
 and TypeScript types in each service are hand-kept in sync with this document;
-JSON Schema copies live under `schemas/` and are enforced in integration tests
-(`tests/integration/test_contracts.py`) so drift between services fails CI
-instead of failing at 3am in production.
+JSON Schema copies live under `schemas/` and are enforced two ways:
+
+1. **`tests/integration/test_contracts.py`** validates real (or example)
+   payloads against `schemas/*.schema.json` in CI, catching drift between
+   what a service actually emits and what it claims to emit.
+2. **A real schema registry** (`scripts/schema_registry.py`, against
+   Redpanda's Confluent-compatible schema registry — already provisioned in
+   `docker-compose.yml`, port 18081) registers each schema as a subject and
+   enforces **BACKWARD compatibility**: a breaking change to `schemas/*.schema.json`
+   is rejected at registration time, not just caught by a CI job after the
+   fact. `make schema-check` runs the same dry-run check locally before you
+   push. Subjects follow Confluent's `{topic}-value` naming:
+
+   | Subject | Schema file |
+   |---|---|
+   | `raw-events-value` | `schemas/raw_event.schema.json` |
+   | `features-value` | `schemas/feature_event.schema.json` |
+   | `alerts-value` | `schemas/alert_event.schema.json` |
+   | `model-metrics-value` | `schemas/model_metrics_event.schema.json` |
+
+   Messages on the wire stay plain JSON — deliberately not wrapped in the
+   Confluent magic-byte + schema-ID envelope Avro/Protobuf setups typically
+   use, so `rpk topic consume` stays human-readable. The registry's value
+   here (reject a breaking change before it ships) doesn't require that
+   envelope, only the registration and compatibility-check API calls the
+   script makes. See `ARCHITECTURE.md`'s rationale table and
+   `scripts/schema_registry.py`'s docstring for the one known gap: Redpanda's
+   JSON Schema compatibility checker doesn't yet resolve `$ref`/`definitions`
+   (affects `raw-events-value` only, which uses `$ref` for its market/payments
+   payload variants — registration still works, the dry-run compatibility
+   check degrades to a warning for that one subject).
 
 Two synthetic domains are simulated end-to-end so the platform reads as
 relevant to both quant/market-risk and fintech/fraud audiences:
