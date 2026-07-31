@@ -1,9 +1,10 @@
 .PHONY: infra-up infra-down up down build logs ps clean \
-        test test-rust test-python test-js \
+        setup test test-rust test-python test-js \
         lint fmt \
         eval load-test demo
 
 COMPOSE := docker compose
+PY_SERVICES := ml-inference api-gateway data-generator
 
 ## Bring up only the infra layer (Redpanda, ClickHouse, Prometheus, Grafana)
 infra-up:
@@ -31,6 +32,20 @@ ps:
 clean:
 	$(COMPOSE) down -v --remove-orphans
 
+## --- Local dev environments (outside Docker) --------------------------------
+## Each Python service manages its own venv (different dependency sets —
+## torch/xgboost for ml-inference, nothing heavy for api-gateway); test/lint
+## targets below call each venv's own binaries, not the system python3/ruff.
+
+setup:
+	@for svc in $(PY_SERVICES); do \
+		echo "==> services/$$svc"; \
+		(cd services/$$svc && python3 -m venv .venv && .venv/bin/pip install -q -r requirements-dev.txt); \
+	done
+	cd services/dashboard && npm install
+	cd tests/eval && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt
+	cd tests/integration && python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt
+
 ## --- Tests ---------------------------------------------------------------
 
 test: test-rust test-python test-js
@@ -40,9 +55,10 @@ test-rust:
 	cd services/feature-service && cargo test
 
 test-python:
-	cd services/ml-inference && python3 -m pytest -q
-	cd services/api-gateway && python3 -m pytest -q
-	cd services/data-generator && python3 -m pytest -q
+	@for svc in $(PY_SERVICES); do \
+		echo "==> services/$$svc"; \
+		(cd services/$$svc && .venv/bin/python -m pytest -q) || exit 1; \
+	done
 
 test-js:
 	cd services/dashboard && npm test -- --run
@@ -50,28 +66,30 @@ test-js:
 ## --- Quality ---------------------------------------------------------------
 
 lint:
-	cd services/ingestion && cargo clippy -- -D warnings
-	cd services/feature-service && cargo clippy -- -D warnings
-	cd services/ml-inference && ruff check app
-	cd services/api-gateway && ruff check app
-	cd services/data-generator && ruff check app
+	cd services/ingestion && cargo clippy --all-targets -- -D warnings
+	cd services/feature-service && cargo clippy --all-targets -- -D warnings
+	@for svc in $(PY_SERVICES); do \
+		echo "==> services/$$svc"; \
+		(cd services/$$svc && .venv/bin/ruff check app $$([ -d scripts ] && echo scripts)) || exit 1; \
+	done
 	cd services/dashboard && npm run lint
 
 fmt:
 	cd services/ingestion && cargo fmt
 	cd services/feature-service && cargo fmt
-	cd services/ml-inference && ruff format app
-	cd services/api-gateway && ruff format app
-	cd services/data-generator && ruff format app
-	cd services/dashboard && npm run format
+	@for svc in $(PY_SERVICES); do \
+		(cd services/$$svc && .venv/bin/ruff format app $$([ -d scripts ] && echo scripts)); \
+	done
 
 ## --- Evaluation / load test -------------------------------------------------
+## Both hit the running stack over HTTP, so either venv works; tests/eval's
+## own venv keeps them independent of any one service's dependency set.
 
 eval:
-	python3 tests/eval/run_eval.py
+	cd tests/eval && .venv/bin/python run_eval.py
 
 load-test:
-	python3 scripts/load_test.py
+	cd tests/eval && .venv/bin/python ../../scripts/load_test.py
 
 demo:
 	bash scripts/demo.sh

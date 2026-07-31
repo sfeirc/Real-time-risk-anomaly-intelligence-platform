@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, Response, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from . import metrics, state
 from .clickhouse_client import ClickHouseClient
@@ -53,6 +54,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="real-time-risk api-gateway", lifespan=lifespan)
+# Wide open deliberately, not an oversight: there is no authentication
+# anywhere in this stack (see docs/roadmap.md's "Auth: none -> everything"),
+# so scoping CORS tightly here would protect nothing real while breaking the
+# dashboard whenever it's opened from a different host/port than whatever
+# origin got hardcoded. The dashboard build (VITE_API_BASE_URL) calls this
+# API cross-origin in production (unlike `npm run dev`, which proxies
+# same-origin through Vite) — without this, every REST call from a built
+# dashboard silently fails as a browser-side CORS block, not a 4xx/5xx.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.include_router(alerts.router)
 app.include_router(models.router)
 app.include_router(system.router)

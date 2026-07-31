@@ -124,11 +124,11 @@ services/
   dashboard/                React/TS — operator UI
 infra/                docker-compose services: Redpanda, ClickHouse, Prometheus, Grafana
 schemas/               JSON Schema copies of docs/data-contracts.md, used in CI
-docs/                  architecture, data contracts, metrics, runbook
+docs/                  architecture, data contracts, metrics, runbook, roadmap, benchmarks
 tests/
-  integration/          end-to-end pipeline tests against docker compose
-  eval/                  precision/recall/drift evaluation harness
-scripts/                replay, load test, demo helpers
+  integration/          contract validation against schemas/*.schema.json
+  eval/                  precision/recall/F1/drift evaluation harness (unit tested + live)
+scripts/                load test, end-to-end demo
 ```
 
 See `docs/data-contracts.md` for exact event schemas and Kafka topic layout,

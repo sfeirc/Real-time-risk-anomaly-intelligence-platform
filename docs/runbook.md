@@ -55,6 +55,21 @@ docker exec -it clickhouse clickhouse-client --query \
   "SELECT ts, entity_key, severity, anomaly_score, probable_cause FROM risk.alerts ORDER BY ts DESC LIMIT 20"
 ```
 
+To wipe data mid-session without a full `make clean` (which drops volumes and
+re-triggers the ClickHouse init scripts), truncate the **rollup tables too**,
+not just the base ones — `alerts_rollup_5m` / `throughput_rollup_1m` /
+`probable_cause_rollup_1h` are materialized views that accumulate on every
+insert into their source table, so truncating `risk.alerts` alone leaves the
+dashboard's charts and KPI tiles (which read the rollups, not `risk.alerts`
+directly — see `services/api-gateway/app/routes/alerts.py`) still showing
+every alert since the container started:
+
+```bash
+for t in raw_events features alerts model_metrics alerts_rollup_5m throughput_rollup_1m probable_cause_rollup_1h; do
+  docker exec clickhouse clickhouse-client --query "TRUNCATE TABLE risk.$t"
+done
+```
+
 ## Troubleshooting
 
 | Symptom | Likely cause | Fix |
