@@ -9,6 +9,7 @@ on:
 jobs:
   rust:
     strategy:
+      fail-fast: false # independent services; one failing shouldn't hide the others' results
       matrix:
         service: [ingestion, feature-service]
     runs-on: ubuntu-latest
@@ -30,6 +31,7 @@ jobs:
 
   python:
     strategy:
+      fail-fast: false
       matrix:
         service: [data-generator, ml-inference, api-gateway]
     runs-on: ubuntu-latest

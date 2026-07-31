@@ -1,4 +1,11 @@
-from prometheus_client import CollectorRegistry, Counter, Gauge, PlatformCollector, ProcessCollector, generate_latest
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    PlatformCollector,
+    ProcessCollector,
+    generate_latest,
+)
 
 registry = CollectorRegistry()
 # See services/ml-inference/app/metrics.py for why these two are registered

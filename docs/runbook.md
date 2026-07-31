@@ -67,9 +67,11 @@ docker exec -it clickhouse clickhouse-client --query \
 
 ## Injecting anomaly scenarios manually
 
-`data-generator` injects scenarios automatically at
-`DATA_GENERATOR_SCENARIO_PROBABILITY` (default 2% of windows). To force one on
-demand for a demo:
+`data-generator` injects scenarios automatically — `DATA_GENERATOR_SCENARIO_PROBABILITY`
+(default 0.002) is a per-entity-per-second spawn chance, not a fraction of
+windows; with scenarios lasting ~10-90s, that works out to each entity
+being anomalous roughly 7% of the time (see the comment on `Settings` in
+`services/data-generator/app/config.py`). To force one on demand for a demo:
 
 ```bash
 curl -X POST http://localhost:8765/inject \
