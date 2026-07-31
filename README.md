@@ -1,5 +1,8 @@
 # Real-Time Risk & Anomaly Intelligence Platform
 
+[![CI](https://github.com/sfeirc/Real-time-risk-anomaly-intelligence-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/sfeirc/Real-time-risk-anomaly-intelligence-platform/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-informational.svg)](LICENSE)
+
 A streaming pipeline that detects abnormal behaviour — volatility spikes,
 fraud, operational incidents, latency blowouts, corrupted data — end to end,
 in real time, with **measured, not claimed**, detection quality and bounded
@@ -15,6 +18,34 @@ platform is deliberately legible to more than one audience:
 | **AI / ML** | A complete, evaluated ML pipeline: statistical + unsupervised + supervised ensemble, explanation, drift detection, precision/recall against held-out ground truth |
 | **Platform / infra** | Rust ingestion + stream processing, Kafka-API streaming, columnar storage, Prometheus/Grafana observability |
 | **Consulting / product** | A visible business problem (bad things happen in data streams; find them fast, explain them, don't cry wolf) with a working demo and a live dashboard |
+
+## Engineering highlights
+
+A sample of what's actually been measured against the live system, not
+claimed — every item links to the full verification, not a summary of it.
+
+- **Found and fixed a real CVE** in the auth library itself (PyJWT):
+  assessed which of ~9 advisories actually applied to this project's
+  specific HS256-only usage before upgrading — [`docs/security.md`](docs/security.md)
+- **Diagnosed a 150x throughput gap**: the standard demo path plateaus at
+  ~190 events/s; traced it to the synthetic load generator's WebSocket
+  connection, not the real pipeline — then proved the actual Rust/Kafka/
+  ClickHouse pipeline sustains ≥29,000 events/s by bypassing it entirely —
+  [`docs/metrics.md` §7](docs/metrics.md)
+- **Killed the database and message broker on purpose** (SIGKILL to the
+  process, not a graceful stop) and measured real recovery: zero data loss,
+  every dependent service reconnecting automatically — [`docs/metrics.md` §5](docs/metrics.md)
+- **End-to-end distributed tracing** across 4 services in 2 languages
+  (Rust + Python) — one real trace spanning every Kafka hop from WebSocket
+  ingest to dashboard delivery, viewable in Jaeger — [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- **Real SHAP explanations**, not a magnitude heuristic — verified against
+  SHAP's own mathematical definition (additivity: per-feature contributions
+  reconstruct the raw prediction), not just "it ran without erroring"
+
+What's covered and what's honestly still open (mTLS, per-operator
+identity, clustering, the pipeline's *actual* ceiling beyond the measured
+floor) is tracked candidly in [`docs/roadmap.md`](docs/roadmap.md) — this
+project's whole ethos is measuring claims, including its own limits.
 
 ## Status
 
