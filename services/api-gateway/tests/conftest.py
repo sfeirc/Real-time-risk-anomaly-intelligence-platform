@@ -3,7 +3,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app import state
-from app.routes import alerts, models, system
+from app.config import settings
+from app.routes import alerts, auth, models, system
 
 
 class FakeClickHouse:
@@ -57,8 +58,25 @@ def fake_http_client():
 
 
 @pytest.fixture
-def client(fake_clickhouse, fake_http_client):
+def auth_settings(monkeypatch):
+    """Deterministic operator credentials for tests that need to exercise
+    the auth boundary, instead of whatever happens to be in the environment."""
+    monkeypatch.setattr(settings, "api_gateway_operator_api_key", "test-operator-key")
+    monkeypatch.setattr(settings, "api_gateway_jwt_secret", "test-jwt-signing-secret")
+    return settings
+
+
+@pytest.fixture
+def operator_token(auth_settings):
+    from app.auth import issue_token
+
+    return issue_token(auth_settings.api_gateway_operator_api_key).access_token
+
+
+@pytest.fixture
+def client(fake_clickhouse, fake_http_client, auth_settings):
     app = FastAPI()
+    app.include_router(auth.router)
     app.include_router(alerts.router)
     app.include_router(models.router)
     app.include_router(system.router)

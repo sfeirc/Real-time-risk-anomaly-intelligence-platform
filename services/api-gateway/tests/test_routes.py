@@ -80,11 +80,32 @@ def test_entities_proxies_data_generator(client, fake_http_client):
     assert url.endswith("/entities")
 
 
-def test_inject_scenario_proxies_post_with_body(client, fake_http_client):
+def test_inject_scenario_proxies_post_with_body(client, fake_http_client, operator_token):
     fake_http_client.next_json = {"status": "injected"}
-    resp = client.post("/api/scenarios/inject", json={"domain": "market", "entity_key": "BTC-USD", "scenario": "volatility_spike"})
+    resp = client.post(
+        "/api/scenarios/inject",
+        json={"domain": "market", "entity_key": "BTC-USD", "scenario": "volatility_spike"},
+        headers={"Authorization": f"Bearer {operator_token}"},
+    )
     assert resp.status_code == 200
     assert resp.json()["status"] == "injected"
     method, _url, kwargs = fake_http_client.calls[0]
     assert method == "POST"
     assert kwargs["json"]["entity_key"] == "BTC-USD"
+
+
+def test_inject_scenario_requires_operator_token(client):
+    resp = client.post(
+        "/api/scenarios/inject",
+        json={"domain": "market", "entity_key": "BTC-USD", "scenario": "volatility_spike"},
+    )
+    assert resp.status_code == 401
+
+
+def test_inject_scenario_rejects_garbage_token(client):
+    resp = client.post(
+        "/api/scenarios/inject",
+        json={"domain": "market", "entity_key": "BTC-USD", "scenario": "volatility_spike"},
+        headers={"Authorization": "Bearer not-a-real-token"},
+    )
+    assert resp.status_code == 401

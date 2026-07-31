@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from .. import metrics, state
+from ..auth import require_operator
 from ..config import settings
 
 log = logging.getLogger("api-gateway.system")
@@ -62,9 +63,12 @@ class InjectRequest(BaseModel):
 
 
 @router.post("/scenarios/inject")
-async def inject_scenario(req: InjectRequest):
+async def inject_scenario(req: InjectRequest, _principal: dict = Depends(require_operator)):
     """Lets the dashboard trigger a demo scenario without exposing
-    data-generator's port directly — see docs/runbook.md."""
+    data-generator's port directly — see docs/runbook.md. This is the one
+    control-plane action this API exposes, so it's the one endpoint that
+    requires an operator JWT (see docs/roadmap.md "Auth: none -> everything");
+    everything else here is read-only telemetry and stays open."""
     try:
         resp = await state.http_client.post(f"{settings.data_generator_url}/inject", json=req.model_dump())
         resp.raise_for_status()

@@ -12,7 +12,7 @@ from . import metrics, state
 from .clickhouse_client import ClickHouseClient
 from .config import settings
 from .kafka_bridge import relay_topic
-from .routes import alerts, models, system
+from .routes import alerts, auth, models, system
 
 logging.basicConfig(level=logging.INFO, format='{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}')
 log = logging.getLogger("api-gateway")
@@ -63,6 +63,7 @@ app = FastAPI(title="real-time-risk api-gateway", lifespan=lifespan)
 # same-origin through Vite) — without this, every REST call from a built
 # dashboard silently fails as a browser-side CORS block, not a 4xx/5xx.
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.include_router(auth.router)
 app.include_router(alerts.router)
 app.include_router(models.router)
 app.include_router(system.router)

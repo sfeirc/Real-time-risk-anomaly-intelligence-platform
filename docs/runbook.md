@@ -86,7 +86,8 @@ done
 (default 0.002) is a per-entity-per-second spawn chance, not a fraction of
 windows; with scenarios lasting ~10-90s, that works out to each entity
 being anomalous roughly 7% of the time (see the comment on `Settings` in
-`services/data-generator/app/config.py`). To force one on demand for a demo:
+`services/data-generator/app/config.py`). To force one on demand for a demo,
+either call `data-generator` directly (no auth, dev-only shortcut):
 
 ```bash
 curl -X POST http://localhost:8765/inject \
@@ -94,6 +95,46 @@ curl -X POST http://localhost:8765/inject \
   -d '{"domain":"market","entity_key":"BTC-USD","scenario":"volatility_spike","duration_s":30}'
 ```
 
+or go through the gateway the same way the dashboard's "Inject" button does,
+which requires an operator JWT (see "Authentication" below):
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8180/auth/token \
+  -H 'Content-Type: application/json' \
+  -d "{\"api_key\":\"$API_GATEWAY_OPERATOR_API_KEY\"}" | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+
+curl -X POST http://localhost:8180/api/scenarios/inject \
+  -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
+  -d '{"domain":"market","entity_key":"BTC-USD","scenario":"volatility_spike","duration_s":30}'
+```
+
 Valid `scenario` values: `volatility_spike`, `fraud_pattern`, `latency_incident`,
 `data_corruption`, `regime_change`, `volume_spike`. See
 `services/data-generator/app/scenarios.py` for exact parameters.
+
+## Authentication
+
+`api-gateway` has one authenticated boundary: `POST /api/scenarios/inject`,
+the one control-plane endpoint this API exposes (see
+`docs/roadmap.md` "Auth: none → everything"). Everything else — alerts,
+model metrics, throughput, the `/ws` stream — is read-only telemetry and
+stays open, on purpose: the RBAC boundary here is "who can act", not "who
+can look".
+
+```bash
+curl -X POST http://localhost:8180/auth/token \
+  -H 'Content-Type: application/json' \
+  -d '{"api_key":"<API_GATEWAY_OPERATOR_API_KEY from .env>"}'
+# -> {"access_token": "<jwt>", "token_type": "bearer", "expires_in": 3600, "role": "operator"}
+```
+
+Send that token as `Authorization: Bearer <jwt>` on `/api/scenarios/inject`.
+The dashboard does this itself via a small "Unlock" prompt in the scenario
+panel — enter the operator key once, it's cached in `localStorage` until the
+token expires (`API_GATEWAY_JWT_EXPIRY_MINUTES`, default 60 minutes).
+
+If `API_GATEWAY_OPERATOR_API_KEY` is unset, `/auth/token` rejects every
+request (fails closed, not open) and `api-gateway` logs a warning at
+startup. If `API_GATEWAY_JWT_SECRET` is unset, the service still runs — it
+generates a random secret at startup (logged loudly) — but every issued
+token is invalidated on restart, so set it explicitly beyond local dev.

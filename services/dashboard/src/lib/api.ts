@@ -1,6 +1,14 @@
 import type { AlertEvent, AlertsRollupRow, CauseRow, Entities, ActiveScenario, ModelMetricsEvent, ThroughputRow } from '../types'
+import { getStoredToken, isOperatorLoggedIn, operatorLogin, operatorLogout } from './auth'
 
 const BASE = import.meta.env.VITE_API_BASE_URL ?? ''
+
+export class UnauthorizedError extends Error {
+  constructor() {
+    super('operator login required')
+    this.name = 'UnauthorizedError'
+  }
+}
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`)
@@ -24,14 +32,20 @@ export const api = {
   entities: () => getJson<Entities>('/api/entities'),
   scenarios: () => getJson<ActiveScenario[]>('/api/scenarios'),
   injectScenario: async (body: { domain: string; entity_key: string; scenario: string; duration_s?: number }) => {
+    const token = getStoredToken()
+    if (!token) throw new UnauthorizedError()
     const res = await fetch(`${BASE}/api/scenarios/inject`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(body),
     })
+    if (res.status === 401 || res.status === 403) throw new UnauthorizedError()
     if (!res.ok) throw new Error(`inject -> ${res.status}`)
     return res.json()
   },
+  isOperatorLoggedIn,
+  operatorLogin: (apiKey: string) => operatorLogin(BASE, apiKey),
+  operatorLogout,
 }
 
 export function wsUrl(): string {

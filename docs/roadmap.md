@@ -77,13 +77,25 @@ of who changed which threshold when, a review/approval flow, and probably
 its own small service rather than a file that ships with the container
 image.
 
-## Auth: none → everything
+## Auth: none → gateway boundary done, internal mesh still open
 
-There is currently no authentication anywhere in this stack — not on the
-API gateway, not on the dashboard, not between internal services. That's
-appropriate for a project scoped to a single developer's local Docker
-network; it is the single largest gap between this and anything
-internet-facing. A real deployment needs, at minimum: API gateway auth
-(even a shared bearer token beats nothing), mTLS or a service mesh between
-internal hops, and RBAC on who can call `/api/scenarios/inject`-equivalent
-control-plane endpoints in a system that can actually block things.
+The API gateway now has a real authenticated boundary: `POST /auth/token`
+exchanges a shared operator API key for a short-lived HS256 JWT
+(`services/api-gateway/app/auth.py`), and the one control-plane action this
+API exposes — `POST /api/scenarios/inject` — requires it
+(`services/api-gateway/app/routes/system.py`). Every read-only endpoint
+(alerts, model metrics, throughput, the `/ws` stream) stays open on purpose:
+the RBAC boundary is "who can act", not "who can look", which is also why
+there's only one role (`operator`) rather than a viewer/operator split — a
+viewer role would gate nothing that isn't already public. The dashboard's
+"Inject" control gates itself behind an "Unlock" prompt for the same reason
+(`services/dashboard/src/components/ScenarioControls.tsx`). See
+`docs/runbook.md`'s "Authentication" section for the exact flow.
+
+What this does *not* close: there's still no mTLS or service mesh between
+internal hops (ingestion → Kafka → feature-service → ML → alerts all trust
+the Docker network implicitly), no per-operator identity (one shared key,
+not individual accounts — fine for a demo operator console, not for an
+audit trail of who injected what), and no encryption in transit anywhere
+(plaintext Kafka, plaintext HTTP). A real deployment needs those three on
+top of what's here now.

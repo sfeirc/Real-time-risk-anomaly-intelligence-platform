@@ -25,5 +25,20 @@ class Settings(BaseSettings):
     # dashboard has something to render before the first live event arrives
     ws_backlog_size: int = 30
 
+    # --- auth (see docs/roadmap.md "Auth: none -> everything") ---
+    # Shared secret an operator exchanges at POST /auth/token for a
+    # short-lived JWT. Read-only endpoints stay open (viewer access); only
+    # control-plane actions (e.g. /api/scenarios/inject) require the token
+    # this key buys — the RBAC boundary is "who can act", not "who can look".
+    # Empty by default so a misconfigured deployment fails closed (nobody can
+    # log in) rather than open.
+    api_gateway_operator_api_key: str = ""
+    # HMAC secret for signing issued JWTs. If left empty the service falls
+    # back to a random secret generated at process start (logged loudly) so
+    # local dev still works — but every issued token is invalidated on
+    # restart, so set this explicitly anywhere that matters.
+    api_gateway_jwt_secret: str = ""
+    api_gateway_jwt_expiry_minutes: int = 60
+
 
 settings = Settings()

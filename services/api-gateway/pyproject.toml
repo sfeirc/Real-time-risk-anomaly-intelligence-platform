@@ -1,0 +1,6 @@
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom calls Depends(...) as a parameter
+# default by design (it's a DI sentinel evaluated once per request by
+# FastAPI's own machinery, not a mutable-default footgun) - this is the
+# standard ruff/FastAPI recipe, not a suppression of a real bug.
+extend-immutable-calls = ["fastapi.Depends"]
