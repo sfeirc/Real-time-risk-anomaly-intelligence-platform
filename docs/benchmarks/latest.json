@@ -168,5 +168,36 @@
         "brier_score_after_calibration": 0.03741078644497256
       }
     }
+  },
+  "breaking_point_test": {
+    "generated_at": "2026-07-31T18:54:00.073117+00:00",
+    "warmup_s": 12,
+    "measure_s": 30,
+    "last_healthy_rate": 200,
+    "first_unhealthy_rate": 500,
+    "tiers": [
+      {
+        "target_rate": 200,
+        "achieved_rate": 189.8,
+        "achieved_rate_ratio": 0.9490000000000001,
+        "ingest_to_alert_p99_ms": null,
+        "kafka_lag_before": 164.0,
+        "kafka_lag_after": 143.0,
+        "healthy": true,
+        "unhealthy_reasons": []
+      },
+      {
+        "target_rate": 500,
+        "achieved_rate": 189.72000000000003,
+        "achieved_rate_ratio": 0.37944000000000006,
+        "ingest_to_alert_p99_ms": 4936.758219999999,
+        "kafka_lag_before": 144.0,
+        "kafka_lag_after": 166.0,
+        "healthy": false,
+        "unhealthy_reasons": [
+          "achieved_rate_ratio=0.37944000000000006 < 0.9"
+        ]
+      }
+    ]
   }
 }

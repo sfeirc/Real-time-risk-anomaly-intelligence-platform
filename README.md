@@ -143,6 +143,19 @@ Every service was built and run for real during development — this isn't a
   scores. Adding the new feature broke four unit tests that hardcoded the
   old 7-feature vector length — fixed by deriving the length from
   `feature_names()` instead, so the next feature added won't repeat this.
+- **Breaking-point test**: `scripts/breaking_point_test.py` genuinely
+  restarts `data-generator` at escalating target rates against the live
+  stack. First run 403'd against ClickHouse — a real, previously-unnoticed
+  gap where `make eval`/`make load-test` never actually loaded `.env` into
+  the host shell running them, silently working only for a no-auth
+  ClickHouse nobody in this project actually runs; fixed at the Makefile
+  level (`include .env` + `export`, with `CLICKHOUSE_HOST` overridden back
+  to `localhost` since `.env`'s value is the container-network name).
+  Chased the resulting ~190 events/s ceiling through two real, tested fixes
+  to data-generator's WebSocket producer loop before confirming — via CPU
+  staying low across every container even at a 2,000/s target — that
+  neither fix was the actual constraint, and reporting the ceiling honestly
+  as unresolved-in-full rather than claiming a fix that didn't work.
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that
@@ -241,3 +254,14 @@ against no-skill baselines of 0.085 / 0.052; calibration cut Brier score
 0.0700→0.0654 (market) and 0.0395→0.0374 (payments) on data the deployed
 model never trained on. These move run to run as more data accumulates —
 reported as the latest measurement, not a fixed score.
+
+**Breaking point** (`scripts/breaking_point_test.py` — see `docs/metrics.md`
+§7): the standard end-to-end path plateaus at ~190 events/s regardless of a
+higher configured target, confirmed unchanged even at 2,000/s. Every
+container's CPU stayed low throughout (data-generator 7.8%, ingestion 2.6%,
+feature-service 2.4%, ml-inference 0.4%, ClickHouse 12.1%, Redpanda 4.3%) —
+this is the synthetic data-generator's single WebSocket connection to
+ingestion hitting a transport-level ceiling, not the Rust/Kafka/ClickHouse
+pipeline running out of room. The real pipeline's ceiling remains
+unmeasured beyond ~190 events/s; that's the honest boundary of what this
+test found, not a claim about the architecture's actual limit.

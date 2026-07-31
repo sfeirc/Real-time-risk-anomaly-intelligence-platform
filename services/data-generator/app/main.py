@@ -117,23 +117,57 @@ class GeneratorState:
 state = GeneratorState()
 
 
+async def _send_or_drop(ws: WebSocket, data: str) -> None:
+    try:
+        await ws.send_text(data)
+    except Exception:  # noqa: BLE001 — one bad client must not break the broadcast fan-out
+        state.clients.discard(ws)
+
+
+# One asyncio.sleep()/tick-loop iteration per *event* tops out around
+# ~190-200 events/s on this hardware regardless of the configured target
+# rate (confirmed by scripts/breaking_point_test.py, then by ruling out
+# CPU saturation and Kafka-produce latency as the cause) - the loop's own
+# per-iteration overhead (event-loop wakeup/scheduling, not compute) is the
+# actual floor, not `settings.events_per_sec`. Fixing this means fewer,
+# fatter ticks rather than more, thinner ones: batch several events into
+# one WS frame per tick (newline-delimited JSON; `ingestion` splits on
+# newline before parsing, see services/ingestion/src/ingest.rs), so the
+# tick rate itself (and therefore the loop's own overhead) stays constant
+# regardless of the target event rate.
+TICK_INTERVAL_S = 0.02  # 50 ticks/s - comfortably under the ~190-200/s single-event ceiling
+
+
+def events_for_tick(events_per_sec: float, tick_interval_s: float, carry: float) -> tuple[int, float]:
+    """How many events this tick should produce, plus the new carry.
+
+    A pure fractional accumulator, not round(): at a target rate that isn't
+    a clean multiple of the tick rate (the common case - e.g. 200 events/s
+    at 50 ticks/s is exactly 4/tick, but most rates aren't that clean),
+    rounding every tick's event count independently would systematically
+    drift the long-run average away from events_per_sec. Carrying the
+    remainder forward keeps it exact over time, the same technique
+    feature-service's own windowing uses for fixed-cadence boundaries.
+    """
+    carry += events_per_sec * tick_interval_s
+    n = int(carry)
+    return n, carry - n
+
+
 async def _producer_loop() -> None:
-    interval = 1.0 / max(settings.events_per_sec, 1.0)
+    carry = 0.0
     while True:
         started = time.monotonic()
-        event = state.next_event()
-        if state.clients:
-            data = event.model_dump_json()
-            dead = []
-            for ws in state.clients:
-                try:
-                    await ws.send_text(data)
-                except Exception:  # noqa: BLE001 — one bad client must not break the broadcast fan-out
-                    dead.append(ws)
-            for ws in dead:
-                state.clients.discard(ws)
+        n, carry = events_for_tick(settings.events_per_sec, TICK_INTERVAL_S, carry)
+
+        if n > 0:
+            events = [state.next_event() for _ in range(n)]
+            if state.clients:
+                data = "\n".join(e.model_dump_json() for e in events)
+                for ws in list(state.clients):
+                    asyncio.create_task(_send_or_drop(ws, data))
         elapsed = time.monotonic() - started
-        await asyncio.sleep(max(0.0, interval - elapsed))
+        await asyncio.sleep(max(0.0, TICK_INTERVAL_S - elapsed))
 
 
 @asynccontextmanager

@@ -185,6 +185,12 @@ services:
     image: jaegertracing/all-in-one:1.76.0
     container_name: jaeger
     <<: *restart-policy
+    command: ["--memory.max-traces=50000"]
+    # In-memory storage has no eviction by default (--memory.max-traces
+    # defaults to unbounded) - found by running this stack for several
+    # hours straight and watching it grow to 5.5GB. 50k traces is a real,
+    # bounded cap (evicts oldest first), not a cosmetic one.
+    mem_limit: 1g
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
@@ -203,6 +209,13 @@ services:
     build: ./services/data-generator
     container_name: data-generator
     <<: [*service-env, *restart-policy]
+    environment:
+      # `${VAR}` here is resolved by `docker compose` itself from the
+      # calling shell's environment (falling back to .env's value) - unlike
+      # env_file, which only ever reads .env, this is what lets
+      # scripts/breaking_point_test.py override the target rate per tier
+      # without editing .env.
+      DATA_GENERATOR_EVENTS_PER_SEC: ${DATA_GENERATOR_EVENTS_PER_SEC:-200}
     ports:
       - "8765:8765"
     networks: [risk-net]

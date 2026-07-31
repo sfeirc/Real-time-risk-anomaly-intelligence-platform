@@ -50,9 +50,24 @@ where
     while let Some(frame) = read.next().await {
         let frame = frame?;
         let Message::Text(text) = frame else { continue };
-        handle_frame(&text, sink, metrics).await;
+        handle_text_frame(&text, sink, metrics).await;
     }
     Ok(())
+}
+
+/// data-generator may batch several events into one WS frame as
+/// newline-delimited JSON at higher target rates (see its
+/// `_producer_loop`'s `TICK_INTERVAL_S`) rather than one frame per event -
+/// most frames still carry exactly one line, which this handles identically
+/// to before a one-line split is just that line.
+async fn handle_text_frame<S: EventSink>(text: &str, sink: &S, metrics: &Metrics) {
+    for line in text.split('\n') {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        handle_frame(line, sink, metrics).await;
+    }
 }
 
 async fn handle_frame<S: EventSink>(text: &str, sink: &S, metrics: &Metrics) {
@@ -158,4 +173,49 @@ mod tests {
         assert_eq!(metrics.kafka_errors_total.get(), 1);
         assert_eq!(metrics.events_total.with_label_values(&["payments"]).get(), 0);
     }
+
+    fn market_json(seq: u64) -> String {
+        // Compact, single-line - matches what data-generator's
+        // `model_dump_json()` actually produces (no embedded newlines),
+        // unlike this file's other test fixtures above (which are
+        // pretty-printed for readability but only ever passed to
+        // `handle_frame` directly, never split on '\n' the way a batched
+        // frame is).
+        format!(
+            r#"{{"event_id": "9069c681-fa99-41dd-98a2-c4af7df360d1", "domain": "market", "entity_key": "BTC-USD", "source": "synthetic-exchange-1", "seq": {seq}, "ts_event": "2026-07-30T23:09:30.852113+00:00", "corrupted": false, "payload": {{"symbol": "BTC-USD", "price": 65000.0, "size": 0.1, "side": "sell", "bid": 64990.0, "ask": 65010.0, "exchange_latency_ms": 3.5}}}}"#
+        )
+    }
+
+    #[tokio::test]
+    async fn newline_batched_frame_forwards_every_event() {
+        // data-generator batches several events per WS frame at higher
+        // target rates (see its _producer_loop) - a single frame carrying
+        // 3 newline-joined events must forward all 3, not just the first.
+        let sink = MockSink::default();
+        let metrics = Metrics::new();
+        let batch = format!("{}\n{}\n{}", market_json(1), market_json(2), market_json(3));
+        handle_text_frame(&batch, &sink, &metrics).await;
+        let sent = sink.sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn single_line_frame_behaves_exactly_as_before() {
+        let sink = MockSink::default();
+        let metrics = Metrics::new();
+        handle_text_frame(&market_json(1), &sink, &metrics).await;
+        assert_eq!(sink.sent.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn blank_lines_in_a_batch_are_skipped_not_parsed() {
+        let sink = MockSink::default();
+        let metrics = Metrics::new();
+        let batch = format!("{}\n\n{}\n", market_json(1), market_json(2));
+        handle_text_frame(&batch, &sink, &metrics).await;
+        assert_eq!(sink.sent.lock().unwrap().len(), 2);
+        assert_eq!(metrics.parse_errors_total.get(), 0);
+    }
 }
+

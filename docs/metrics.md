@@ -129,6 +129,40 @@ smaller data volume before `velocity_count` was added, measured higher
 AUCPR) - reported as the current measurement, not a permanent score;
 re-running `scripts/train_xgboost.py` is expected to move them again.
 
+## 7. Breaking point
+
+`scripts/breaking_point_test.py` escalates `data-generator`'s target event
+rate (200 → 500 → 1000 → ... events/s, restarting it between tiers) until
+the pipeline measurably can't keep up, judged against three signals per
+tier: achieved throughput vs. target, `latency_ingest_to_alert_ms` p99
+against a generous multiple of budget, and whether Kafka consumer lag grew
+over the measurement window. See `docs/benchmarks/latest.json`'s
+`breaking_point_test` key for the full per-tier numbers.
+
+**Measured result: the standard end-to-end path (`make up`, exactly as
+anyone runs this project) plateaus at ~190 events/s, regardless of a higher
+configured target** - confirmed unchanged even at a 2,000/s target. This is
+*not* the downstream Rust/Kafka/ClickHouse pipeline running out of room:
+every container's CPU stayed low throughout (data-generator 7.8%,
+ingestion 2.6%, feature-service 2.4%, ml-inference 0.4%, ClickHouse 12.1%,
+Redpanda 4.3%, at a 2,000/s target), and `ingestion_ws_to_kafka_ms` p99
+stayed under 10ms the entire time. The ceiling is specifically the single
+WebSocket connection `data-generator` uses to feed `ingestion` (see
+`services/data-generator/app/main.py`'s `_producer_loop`) - two real fixes
+were tried and verified not to move it (fire-and-forget sends instead of
+awaiting each one inline; batching multiple events into fewer, larger WS
+frames via a fractional-carry accumulator, tested in
+`tests/test_main.py::test_*`), which rules out per-tick event-loop overhead
+and per-call scheduling as the cause. What's left is very likely a
+lower-level transport constraint (Docker bridge networking, or
+uvicorn/Starlette's WebSocket write path) that would need packet-level
+inspection to pin down further - not pursued here, since `data-generator`
+is explicitly a synthetic test-harness component (see `ARCHITECTURE.md`),
+not the pipeline this project demonstrates. **The actual Rust/Kafka/
+ClickHouse pipeline's ceiling remains unmeasured beyond ~190 events/s** -
+the honest boundary of what this test found, not a claim that ~190/s is
+the architecture's real limit.
+
 ## Severity thresholds (defaults, `services/ml-inference/app/rules.yaml`)
 
 | `anomaly_score` | severity | action |

@@ -3,10 +3,28 @@
         lint fmt \
         eval load-test demo \
         schema-register schema-check schema-self-test \
-        chaos-test
+        chaos-test breaking-point-test
 
 COMPOSE := docker compose
 PY_SERVICES := ml-inference api-gateway data-generator
+
+# Host-side scripts (eval, load-test, chaos-test, breaking-point-test,
+# schema-*) connect to ClickHouse/Prometheus/etc. from *outside* Docker and
+# read CLICKHOUSE_PASSWORD etc. straight from the environment - `env_file:
+# .env` in docker-compose.yml only ever injects .env into containers, never
+# into the shell running `make`. Without this, every one of those targets
+# 403s against ClickHouse the moment a password is set, silently succeeding
+# only for a default-no-auth setup nobody actually runs (found by running
+# scripts/breaking_point_test.py and hitting exactly that 403).
+ifneq (,$(wildcard .env))
+include .env
+export
+endif
+# .env's CLICKHOUSE_HOST is the container-network name ("clickhouse"),
+# right for docker-compose's env_file but wrong for every host-side script
+# above, which reaches it via the published port instead - override just
+# this one var back to what every script's own default already assumes.
+export CLICKHOUSE_HOST := localhost
 
 ## Bring up only the infra layer (Redpanda, ClickHouse, Prometheus, Grafana)
 infra-up:
@@ -116,3 +134,11 @@ schema-self-test:
 
 chaos-test:
 	cd tests/integration && .venv/bin/python ../../scripts/chaos_test.py
+
+## --- Breaking point -----------------------------------------------------
+## Escalates data-generator's event rate until the pipeline can't keep up,
+## restarting data-generator between tiers (restored to its normal rate
+## afterward). See scripts/breaking_point_test.py.
+
+breaking-point-test:
+	cd tests/integration && .venv/bin/python ../../scripts/breaking_point_test.py

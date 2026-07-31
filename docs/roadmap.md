@@ -121,6 +121,23 @@ an export failure or an unreachable Jaeger never affects whether an event
 actually gets processed - no service treats it as a hard dependency (see
 `docker-compose.yml`'s comment on the `jaeger` service).
 
+## Load testing: single-rate measurement → a found (partial) breaking point
+
+`scripts/breaking_point_test.py` escalates `data-generator`'s target rate
+until the pipeline can't keep up, and found the standard end-to-end path
+plateaus at ~190 events/s - but traced that ceiling to `data-generator`'s
+own WebSocket connection to `ingestion`, not the Rust/Kafka/ClickHouse
+pipeline (every container's CPU stayed low even at a 2,000/s target - see
+`docs/metrics.md` §7). Two real fixes to the WS producer loop were tried,
+tested, and verified not to move the ceiling, so it's reported as an open
+question rather than a solved one. The natural next step for whoever wants
+the *pipeline's* real ceiling (not the test harness's): a load generator
+that produces directly onto the `raw-events` Kafka topic, bypassing
+`data-generator`'s WebSocket bridge entirely - a genuinely different tool
+than `data-generator` (which exists to produce a *realistic*, scenario-
+labeled stream for detection-quality evaluation, not raw throughput), not a
+fix to this one.
+
 ## Rules engine: YAML file → owned, audited config service
 
 `services/ml-inference/app/rules.yaml` is read at process start (plus
