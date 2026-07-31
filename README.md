@@ -162,6 +162,14 @@ Every service was built and run for real during development — this isn't a
   which applied to this project's specific HS256-only, no-remote-keys usage
   (most didn't), upgraded to `2.13.0` anyway, and re-verified the whole auth
   flow end to end against the live stack afterward. See `docs/security.md`.
+- **Direct-to-Kafka load test**: `scripts/kafka_load_test.py` produced over
+  2 million real synthetic events through the live pipeline in one run.
+  Caught a real methodology bug in itself before trusting the first
+  results — the initial version reused the live demo's actual entity
+  symbols (`BTC-USD` etc.), which would have mixed synthetic load-test
+  volume into those entities' real EWMA/z-score baselines; fixed to use
+  disjoint synthetic entity keys, and cleaned up the already-inserted
+  contaminated rows from ClickHouse before reporting final numbers.
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that
@@ -265,10 +273,19 @@ reported as the latest measurement, not a fixed score.
 **Breaking point** (`scripts/breaking_point_test.py` — see `docs/metrics.md`
 §7): the standard end-to-end path plateaus at ~190 events/s regardless of a
 higher configured target, confirmed unchanged even at 2,000/s. Every
-container's CPU stayed low throughout (data-generator 7.8%, ingestion 2.6%,
-feature-service 2.4%, ml-inference 0.4%, ClickHouse 12.1%, Redpanda 4.3%) —
-this is the synthetic data-generator's single WebSocket connection to
-ingestion hitting a transport-level ceiling, not the Rust/Kafka/ClickHouse
-pipeline running out of room. The real pipeline's ceiling remains
-unmeasured beyond ~190 events/s; that's the honest boundary of what this
-test found, not a claim about the architecture's actual limit.
+container's CPU stayed low throughout — this is the synthetic
+data-generator's single WebSocket connection to ingestion hitting a
+transport-level ceiling, not the Rust/Kafka/ClickHouse pipeline running out
+of room.
+
+**The real pipeline's ceiling, measured directly** (`scripts/kafka_load_test.py`,
+producing straight onto Kafka, bypassing the WS bridge — see
+`docs/metrics.md` §7): **~29,000 events/s sustained**, zero Kafka consumer
+lag growth, feature-service at just 2.33% CPU — a floor set by the load
+generator's own producer-side ceiling (~33,687 events/s, unchanged from 4
+to 32 concurrent producers), not by the pipeline running out of headroom.
+~150x the WS-bridge-limited number. Also surfaced a real architectural
+property: ml-inference's throughput scales with the *number of monitored
+entities* (feature-service emits one event per entity per window,
+regardless of raw volume), not with raw event rate — the relevant scaling
+question for this design isn't "events/s", it's "how many entities".

@@ -121,22 +121,31 @@ an export failure or an unreachable Jaeger never affects whether an event
 actually gets processed - no service treats it as a hard dependency (see
 `docker-compose.yml`'s comment on the `jaeger` service).
 
-## Load testing: single-rate measurement → a found (partial) breaking point
+## Load testing: single-rate measurement → a found and explained breaking point (done)
 
 `scripts/breaking_point_test.py` escalates `data-generator`'s target rate
 until the pipeline can't keep up, and found the standard end-to-end path
 plateaus at ~190 events/s - but traced that ceiling to `data-generator`'s
 own WebSocket connection to `ingestion`, not the Rust/Kafka/ClickHouse
-pipeline (every container's CPU stayed low even at a 2,000/s target - see
-`docs/metrics.md` §7). Two real fixes to the WS producer loop were tried,
-tested, and verified not to move the ceiling, so it's reported as an open
-question rather than a solved one. The natural next step for whoever wants
-the *pipeline's* real ceiling (not the test harness's): a load generator
-that produces directly onto the `raw-events` Kafka topic, bypassing
-`data-generator`'s WebSocket bridge entirely - a genuinely different tool
-than `data-generator` (which exists to produce a *realistic*, scenario-
-labeled stream for detection-quality evaluation, not raw throughput), not a
-fix to this one.
+pipeline (every container's CPU stayed low even at a 2,000/s target).
+
+`scripts/kafka_load_test.py` followed up by producing directly onto
+`raw-events`, bypassing that WS bridge entirely - a genuinely different
+tool than `data-generator` (which exists to produce a *realistic*,
+scenario-labeled stream for detection-quality evaluation, not raw
+throughput), not a fix to it. Measured result: the real pipeline sustains
+at least ~29,000 events/s with zero Kafka lag growth at 2.33% CPU on
+feature-service - ~150x the WS-bridge number - and that's a floor set by
+the load generator's own producer-side ceiling (~33,700/s, unchanged from 4
+to 32 concurrent producers), not by the pipeline running out of room. See
+`docs/metrics.md` §7 for the full numbers, including a real architectural
+property this surfaced: ml-inference's throughput scales with the *number
+of monitored entities* (one feature event per entity per window,
+regardless of raw volume), not with raw event rate.
+
+Still open, for whoever wants the pipeline's *actual* ceiling rather than a
+verified floor: a producer that isn't itself the bottleneck (multiple OS
+processes, or a compiled load generator instead of Python).
 
 ## Security: no scanning → recurring dependency audit in CI (done for dependencies)
 

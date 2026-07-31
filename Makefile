@@ -3,7 +3,7 @@
         lint fmt \
         eval load-test demo \
         schema-register schema-check schema-self-test \
-        chaos-test breaking-point-test
+        chaos-test breaking-point-test kafka-load-test
 
 COMPOSE := docker compose
 PY_SERVICES := ml-inference api-gateway data-generator
@@ -142,3 +142,9 @@ chaos-test:
 
 breaking-point-test:
 	cd tests/integration && .venv/bin/python ../../scripts/breaking_point_test.py
+
+## Produces directly onto raw-events, bypassing data-generator's WS bridge
+## (see scripts/breaking_point_test.py's finding that the WS bridge, not
+## this downstream pipeline, was the measured ceiling) - see scripts/kafka_load_test.py.
+kafka-load-test:
+	cd tests/integration && .venv/bin/python ../../scripts/kafka_load_test.py

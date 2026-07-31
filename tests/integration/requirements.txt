@@ -1,2 +1,4 @@
 httpx==0.28.1
 jsonschema==4.24.0
+aiokafka==0.14.0
+cramjam==2.11.0

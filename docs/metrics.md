@@ -158,10 +158,46 @@ lower-level transport constraint (Docker bridge networking, or
 uvicorn/Starlette's WebSocket write path) that would need packet-level
 inspection to pin down further - not pursued here, since `data-generator`
 is explicitly a synthetic test-harness component (see `ARCHITECTURE.md`),
-not the pipeline this project demonstrates. **The actual Rust/Kafka/
-ClickHouse pipeline's ceiling remains unmeasured beyond ~190 events/s** -
-the honest boundary of what this test found, not a claim that ~190/s is
-the architecture's real limit.
+not the pipeline this project demonstrates. **Follow-up: the real pipeline's ceiling, measured directly.**
+`scripts/kafka_load_test.py` produces synthetic events straight onto
+`raw-events` via `aiokafka`, bypassing `data-generator`'s WS bridge
+entirely - this is what actually answers the question the WS-bridge test
+couldn't. Measured (60s, 16 concurrent producer coroutines, entity keys
+deliberately disjoint from the live demo's real ones so this doesn't
+pollute its EWMA/z-score baselines - see the script's docstring):
+
+| | value |
+|---|---|
+| Produced | 2,021,959 events in 60s = **33,687 events/s** |
+| Kafka consumer lag, before → after | 112 → 112 (flat - no backlog accumulated) |
+| feature-service consume rate | **29,065 events/s** |
+| feature-service CPU during the run | **2.33%** |
+| ClickHouse / Redpanda CPU during the run | 3.94% / 4.56% |
+
+feature-service sustained ~29K events/s with *zero* Kafka lag growth at
+2.33% CPU - not near its own ceiling, near this test's producer-side one
+(the achieved produce rate plateaued at ~32-34k/s regardless of raising
+concurrency from 4 to 32, most likely this single Python process's own
+`aiokafka` client/GIL limit, not Redpanda's). So the honest statement is:
+**the real Rust/Kafka/ClickHouse pipeline sustains at least ~29,000
+events/s, ~150x the WS-bridge-limited ~190/s the first test measured**,
+and even that is a floor set by the load generator, not by feature-service
+running out of room. A stronger claim (the *actual* ceiling, not just a
+floor) would need a producer that isn't itself the bottleneck - multiple
+OS processes instead of one, or a compiled load generator instead of
+Python - not pursued here.
+
+Also note the throughput asymmetry between feature-service (raw events in)
+and ml-inference (scored *windows* in): ml-inference's consume rate stayed
+at ~7-8 events/s throughout, regardless of raw-event volume - because
+feature-service emits one feature event per entity per window
+(`window_size_s`), not one per raw event. With ~13 synthetic entities and
+2-5s windows, the feature-emission rate is capped at roughly (entity
+count) ÷ (window size), independent of raw ingestion volume. **The
+system's alerting throughput scales with the number of monitored
+entities, not with per-entity event rate** - a real architectural property
+worth knowing before assuming "more raw events/s" is the relevant scaling
+question for this design.
 
 ## Severity thresholds (defaults, `services/ml-inference/app/rules.yaml`)
 

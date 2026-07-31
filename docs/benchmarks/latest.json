@@ -199,5 +199,34 @@
         ]
       }
     ]
+  },
+  "kafka_direct_load_test": {
+    "generated_at": "2026-07-31T19:33:39.319440+00:00",
+    "duration_s": 60.0,
+    "concurrency": 16,
+    "total_produced": 2021959,
+    "produced_rate_events_per_s": 33687.27755463617,
+    "kafka_lag_before": 112.0,
+    "kafka_lag_after": 112.0,
+    "feature_service_consumed_rate_events_per_s": 29065.125211109844,
+    "ml_inference_consumed_rate_events_per_s": 7.79761140048702,
+    "container_resources": {
+      "ml-inference": {
+        "cpu_percent": "12.48%",
+        "memory": "333.2MiB / 30.26GiB"
+      },
+      "feature-service": {
+        "cpu_percent": "2.33%",
+        "memory": "19.13MiB / 30.26GiB"
+      },
+      "clickhouse": {
+        "cpu_percent": "3.94%",
+        "memory": "858.5MiB / 30.26GiB"
+      },
+      "redpanda": {
+        "cpu_percent": "4.56%",
+        "memory": "836.6MiB / 30.26GiB"
+      }
+    }
   }
 }

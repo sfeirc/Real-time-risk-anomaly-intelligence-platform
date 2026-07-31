@@ -43,6 +43,7 @@ make eval                     # precision/recall/drift report -> docs/benchmarks
 make load-test                 # throughput/latency benchmark -> docs/benchmarks/latest.json
 make chaos-test                  # kills each core service, measures real recovery time -> docs/benchmarks/latest.json
 make breaking-point-test           # escalates event rate until the pipeline can't keep up -> docs/benchmarks/latest.json
+make kafka-load-test              # produces directly onto Kafka, bypassing the WS bridge, for the pipeline's real ceiling -> docs/benchmarks/latest.json
 make demo                       # scripted end-to-end demo (see scripts/demo.sh)
 ```
 
