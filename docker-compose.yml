@@ -125,6 +125,11 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+      # consumed via $__env{} in infra/grafana/provisioning/datasources -
+      # the ClickHouse datasource needs credentials now that the default
+      # user requires them (see docs/runbook.md troubleshooting).
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-risk_dev_only}
     volumes:
       - grafana-data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning

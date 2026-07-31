@@ -59,6 +59,15 @@ impl Metrics {
         )
         .unwrap();
 
+        // A fresh `Registry::new()` (rather than the crate's global default)
+        // doesn't get process_cpu_seconds_total / process_resident_memory_bytes
+        // for free — registered explicitly here so "Cout memoire / CPU" (see
+        // docs/metrics.md) is an actual exposed metric everywhere, not just in
+        // the Python services where this is easy to forget too.
+        registry
+            .register(Box::new(prometheus::process_collector::ProcessCollector::for_self()))
+            .unwrap();
+
         registry.register(Box::new(events_total.clone())).unwrap();
         registry
             .register(Box::new(parse_errors_total.clone()))

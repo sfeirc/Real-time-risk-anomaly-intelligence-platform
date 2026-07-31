@@ -45,6 +45,12 @@ impl Metrics {
         )
         .unwrap();
 
+        // See services/ingestion/src/metrics.rs — a fresh Registry doesn't
+        // get process metrics for free.
+        registry
+            .register(Box::new(prometheus::process_collector::ProcessCollector::for_self()))
+            .unwrap();
+
         registry.register(Box::new(events_consumed_total.clone())).unwrap();
         registry.register(Box::new(windows_emitted_total.clone())).unwrap();
         registry.register(Box::new(parse_errors_total.clone())).unwrap();

@@ -1,0 +1,128 @@
+{
+  "title": "Real-time Risk Platform - Overview",
+  "uid": "risk-platform-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "tags": ["risk-platform"],
+  "panels": [
+    { "type": "row", "title": "Latency (p99)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 100 },
+
+    {
+      "id": 1, "type": "stat", "title": "Ingestion: WS → Kafka",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.99, sum(rate(ingestion_ws_to_kafka_ms_bucket[5m])) by (le))", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 5 }, { "color": "red", "value": 20 }] } } }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Feature window emit lag",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.99, sum(rate(feature_window_emit_lag_ms_bucket[5m])) by (le))", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 20 }, { "color": "red", "value": 100 }] } } }
+    },
+    {
+      "id": 3, "type": "stat", "title": "ML inference (scoring)",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "histogram_quantile(0.99, sum(rate(ml_inference_ms_bucket[5m])) by (le))", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "steps": [{ "color": "green" }, { "color": "orange", "value": 50 }, { "color": "red", "value": 250 }] } } }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Alerts produced /s",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(rate(ml_alerts_produced_total[5m]))", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+
+    { "type": "row", "title": "Throughput", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }, "id": 101 },
+
+    {
+      "id": 10, "type": "timeseries", "title": "Events consumed /s (by stage, domain)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(ingestion_events_total[1m])) by (domain)", "legendFormat": "ingestion/{{domain}}", "refId": "A" },
+        { "expr": "sum(rate(feature_events_consumed_total[1m])) by (domain)", "legendFormat": "feature-service/{{domain}}", "refId": "B" },
+        { "expr": "sum(rate(ml_features_consumed_total[1m])) by (domain)", "legendFormat": "ml-inference/{{domain}}", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Alerts produced /s (by severity)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(rate(ml_alerts_produced_total[1m])) by (severity)", "legendFormat": "{{severity}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+
+    { "type": "row", "title": "Errors", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 }, "id": 102 },
+
+    {
+      "id": 20, "type": "timeseries", "title": "Error rates across the pipeline",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(rate(ingestion_parse_errors_total[5m]))", "legendFormat": "ingestion: parse", "refId": "A" },
+        { "expr": "sum(rate(ingestion_kafka_produce_errors_total[5m]))", "legendFormat": "ingestion: kafka produce", "refId": "B" },
+        { "expr": "sum(rate(feature_parse_errors_total[5m]))", "legendFormat": "feature-service: parse", "refId": "C" },
+        { "expr": "sum(rate(feature_clickhouse_write_errors_total[5m])) by (table)", "legendFormat": "feature-service: clickhouse {{table}}", "refId": "D" },
+        { "expr": "sum(rate(ml_parse_errors_total[5m]))", "legendFormat": "ml-inference: parse", "refId": "E" },
+        { "expr": "sum(rate(ml_processing_errors_total[5m])) by (domain)", "legendFormat": "ml-inference: processing/{{domain}}", "refId": "F" },
+        { "expr": "sum(rate(ml_clickhouse_write_errors_total[5m]))", "legendFormat": "ml-inference: clickhouse", "refId": "G" },
+        { "expr": "sum(rate(api_clickhouse_query_errors_total[5m])) by (endpoint)", "legendFormat": "api-gateway: {{endpoint}}", "refId": "H" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+
+    { "type": "row", "title": "Model health", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 }, "id": 103 },
+
+    {
+      "id": 30, "type": "stat", "title": "Models trained & ready",
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "ml_model_ready", "legendFormat": "{{domain}}/{{model}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "warming up", "color": "orange" }, "1": { "text": "ready", "color": "green" } } }] } },
+      "options": { "textMode": "value_and_name" }
+    },
+    {
+      "id": 31, "type": "stat", "title": "Drift detected",
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "ml_drift_detected", "legendFormat": "{{domain}}", "refId": "A" }],
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "0": { "text": "stable", "color": "green" }, "1": { "text": "drift", "color": "orange" } } }] } },
+      "options": { "textMode": "value_and_name" }
+    },
+
+    { "type": "row", "title": "Resource cost", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 }, "id": 104 },
+
+    {
+      "id": 40, "type": "timeseries", "title": "CPU (core-seconds/s, per service)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(process_cpu_seconds_total{job=\"ingestion\"}[5m])", "legendFormat": "ingestion", "refId": "A" },
+        { "expr": "rate(process_cpu_seconds_total{job=\"feature-service\"}[5m])", "legendFormat": "feature-service", "refId": "B" },
+        { "expr": "rate(process_cpu_seconds_total{job=\"ml-inference\"}[5m])", "legendFormat": "ml-inference", "refId": "C" },
+        { "expr": "rate(process_cpu_seconds_total{job=\"api-gateway\"}[5m])", "legendFormat": "api-gateway", "refId": "D" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" } }
+    },
+    {
+      "id": 41, "type": "timeseries", "title": "Resident memory, per service",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "process_resident_memory_bytes{job=\"ingestion\"}", "legendFormat": "ingestion", "refId": "A" },
+        { "expr": "process_resident_memory_bytes{job=\"feature-service\"}", "legendFormat": "feature-service", "refId": "B" },
+        { "expr": "process_resident_memory_bytes{job=\"ml-inference\"}", "legendFormat": "ml-inference", "refId": "C" },
+        { "expr": "process_resident_memory_bytes{job=\"api-gateway\"}", "legendFormat": "api-gateway", "refId": "D" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    }
+  ]
+}
