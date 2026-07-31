@@ -21,15 +21,35 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{Consumer, StreamConsumer};
-use rdkafka::message::Message;
+use rdkafka::message::{Header, Headers, Message, OwnedHeaders};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout;
+use tracing::Instrument;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::clickhouse::ClickHouseSink;
 use crate::config::Config;
 use crate::metrics::Metrics;
 use crate::model::{Domain, FeatureEvent, RawEvent};
+use crate::telemetry;
 use crate::window::EntityWindow;
+
+/// Reads a consumed Kafka message's headers into a plain map so they can
+/// outlive the borrowed message (needed to stash the latest one per entity
+/// across `handle_raw_event` calls, for `sweep_and_emit` to pick up later).
+fn extract_headers(headers: Option<&rdkafka::message::BorrowedHeaders>) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    if let Some(headers) = headers {
+        for header in headers.iter() {
+            if let Some(value) = header.value
+                && let Ok(value) = std::str::from_utf8(value)
+            {
+                map.insert(header.key.to_string(), value.to_string());
+            }
+        }
+    }
+    map
+}
 
 pub async fn run(cfg: &Config, metrics: Arc<Metrics>) {
     let consumer: StreamConsumer = ClientConfig::new()
@@ -61,6 +81,15 @@ pub async fn run(cfg: &Config, metrics: Arc<Metrics>) {
     let mut raw_events_batch: Vec<RawEvent> = Vec::new();
 
     let mut windows: HashMap<String, EntityWindow> = HashMap::new();
+    // Latest incoming traceparent per entity, so the span for a window's
+    // eventual flush (see sweep_and_emit) can be a child of *some* real
+    // upstream trace instead of a disconnected root. A window aggregates
+    // many raw events; picking the most recent one's context as the
+    // representative parent is a deliberate simplification over a full
+    // fan-in of span Links to every contributing event - readable traces
+    // over exhaustive ones, same tradeoff windowed-stream tracing usually
+    // makes elsewhere (Kafka Streams, Flink).
+    let mut window_trace_headers: HashMap<String, HashMap<String, String>> = HashMap::new();
 
     // 25ms so window-close detection latency stays well under the ~20ms p99
     // budget in ARCHITECTURE.md; cheap at this entity count (a handful of
@@ -81,14 +110,15 @@ pub async fn run(cfg: &Config, metrics: Arc<Metrics>) {
                 match msg {
                     Ok(m) => {
                         if let Some(payload) = m.payload() {
-                            handle_raw_event(payload, cfg, &mut windows, &mut raw_events_batch, &metrics);
+                            let headers = extract_headers(m.headers());
+                            handle_raw_event(payload, cfg, &mut windows, &mut window_trace_headers, headers, &mut raw_events_batch, &metrics);
                         }
                     }
                     Err(e) => tracing::warn!(error = %e, "kafka consume error"),
                 }
             }
             _ = sweep_interval.tick() => {
-                sweep_and_emit(&mut windows, &producer, cfg, &metrics, &mut features_batch).await;
+                sweep_and_emit(&mut windows, &mut window_trace_headers, &producer, cfg, &metrics, &mut features_batch).await;
                 if features_batch.len() >= cfg.clickhouse_batch_size {
                     flush_features(&ch_sink, &mut features_batch, &metrics).await;
                 }
@@ -108,6 +138,8 @@ fn handle_raw_event(
     payload: &[u8],
     cfg: &Config,
     windows: &mut HashMap<String, EntityWindow>,
+    window_trace_headers: &mut HashMap<String, HashMap<String, String>>,
+    trace_headers: HashMap<String, String>,
     raw_events_batch: &mut Vec<RawEvent>,
     metrics: &Metrics,
 ) {
@@ -129,12 +161,14 @@ fn handle_raw_event(
         .entry(event.entity_key.clone())
         .or_insert_with(|| EntityWindow::new(event.domain, window_size_s, cfg.ewma_alpha, Utc::now()));
     window.add(&event);
+    window_trace_headers.insert(event.entity_key.clone(), trace_headers);
 
     raw_events_batch.push(event);
 }
 
 async fn sweep_and_emit(
     windows: &mut HashMap<String, EntityWindow>,
+    window_trace_headers: &mut HashMap<String, HashMap<String, String>>,
     producer: &FutureProducer,
     cfg: &Config,
     metrics: &Metrics,
@@ -154,16 +188,38 @@ async fn sweep_and_emit(
         }
         metrics.windows_emitted_total.with_label_values(&[feature.domain.as_str()]).inc();
 
-        match serde_json::to_vec(&feature) {
-            Ok(payload) => {
-                let record = FutureRecord::to(&cfg.topic_features).payload(&payload).key(entity_key);
-                if let Err((e, _owned)) = producer.send(record, Timeout::After(Duration::from_secs(5))).await {
-                    metrics.kafka_produce_errors_total.inc();
-                    tracing::warn!(error = %e.to_string(), entity = %entity_key, "failed to produce feature event");
+        // Child of the most recent contributing raw event's trace (see the
+        // doc comment on window_trace_headers in `run`), so this window's
+        // whole trace - through ml-inference's eventual scoring - is
+        // reachable from whichever WS event happened to seed it.
+        let parent_cx = window_trace_headers
+            .get(entity_key)
+            .map(telemetry::extract_parent_context)
+            .unwrap_or_default();
+        let span = tracing::info_span!("compute_window", entity_key = %entity_key, domain = %feature.domain.as_str(), count = feature.count);
+        // Best-effort like the rest of this service's telemetry (metrics,
+        // logs): a tracing-plumbing failure here must never affect whether
+        // the feature event itself gets produced.
+        let _ = span.set_parent(parent_cx);
+
+        async {
+            match serde_json::to_vec(&feature) {
+                Ok(payload) => {
+                    let mut headers = OwnedHeaders::new();
+                    for (key, value) in telemetry::inject_current_context() {
+                        headers = headers.insert(Header { key: &key, value: Some(&value) });
+                    }
+                    let record = FutureRecord::to(&cfg.topic_features).payload(&payload).key(entity_key).headers(headers);
+                    if let Err((e, _owned)) = producer.send(record, Timeout::After(Duration::from_secs(5))).await {
+                        metrics.kafka_produce_errors_total.inc();
+                        tracing::warn!(error = %e.to_string(), entity = %entity_key, "failed to produce feature event");
+                    }
                 }
+                Err(e) => tracing::error!(error = %e, "failed to serialize feature event (should never happen)"),
             }
-            Err(e) => tracing::error!(error = %e, "failed to serialize feature event (should never happen)"),
         }
+        .instrument(span)
+        .await;
 
         ch_batch.push(feature);
     }

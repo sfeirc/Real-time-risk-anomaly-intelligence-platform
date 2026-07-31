@@ -26,6 +26,7 @@ Endpoints once everything is healthy:
 | ClickHouse HTTP | http://localhost:8123 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 (admin / `GRAFANA_ADMIN_PASSWORD` in `.env`) |
+| Jaeger (distributed tracing) | http://localhost:16686 |
 
 ## Common operations
 
@@ -138,3 +139,22 @@ request (fails closed, not open) and `api-gateway` logs a warning at
 startup. If `API_GATEWAY_JWT_SECRET` is unset, the service still runs — it
 generates a random secret at startup (logged loudly) — but every issued
 token is invalidated on restart, so set it explicitly beyond local dev.
+
+## Tracing
+
+Every service exports OpenTelemetry spans to Jaeger
+(http://localhost:16686), propagated across every Kafka hop via a W3C
+`traceparent` message header — one trace per event, from WebSocket ingest
+through feature windowing and ML scoring to the alert reaching a dashboard
+client. To see one: open Jaeger, pick "api-gateway" as the service and
+"relay_to_ws" as the operation (that's the *last* hop, so searching there
+finds complete traces rather than in-flight ones), and open any result. You
+should see four spans: `ingestion: ingest_event` → `feature-service:
+compute_window` → `ml-inference: score_window` → `api-gateway: relay_to_ws`.
+
+Tracing is best-effort everywhere: if Jaeger is down or unreachable, spans
+are silently dropped and nothing else is affected - no service treats it as
+a dependency. `OTEL_EXPORTER_OTLP_ENDPOINT` (standard OTel env var,
+defaults to `http://jaeger:4318`) points every exporter at it; see
+`docs/roadmap.md`'s "Observability" entry for what this covers and its two
+deliberate simplifications.

@@ -23,6 +23,7 @@ pub struct Config {
     pub ewma_alpha: f64,
     pub clickhouse_batch_size: usize,
     pub clickhouse_flush_interval_ms: u64,
+    pub otlp_endpoint: String,
 }
 
 impl Config {
@@ -45,6 +46,7 @@ impl Config {
             ewma_alpha: env_or_parse("FEATURE_EWMA_ALPHA", 0.1),
             clickhouse_batch_size: env_or_parse("FEATURE_CLICKHOUSE_BATCH_SIZE", 200usize),
             clickhouse_flush_interval_ms: env_or_parse("FEATURE_CLICKHOUSE_FLUSH_INTERVAL_MS", 1000u64),
+            otlp_endpoint: env_or("OTEL_EXPORTER_OTLP_ENDPOINT", "http://jaeger:4318"),
         }
     }
 }

@@ -1,6 +1,8 @@
 use crate::model::RawEvent;
+use crate::telemetry;
 use rdkafka::config::ClientConfig;
 use rdkafka::error::KafkaError;
+use rdkafka::message::{Header, OwnedHeaders};
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::util::Timeout;
 use std::time::Duration;
@@ -36,9 +38,21 @@ impl KafkaSink {
 impl EventSink for KafkaSink {
     async fn send(&self, event: &RawEvent) -> Result<(), String> {
         let payload = serde_json::to_vec(event).map_err(|e| e.to_string())?;
+        // Carries the current tracing span's context (the `ingest_event`
+        // span entered by ingest::handle_frame) across the Kafka hop as a
+        // W3C traceparent header, so feature-service can continue the same
+        // trace instead of starting a disconnected one - see crate::telemetry.
+        let mut headers = OwnedHeaders::new();
+        for (key, value) in telemetry::inject_current_context() {
+            headers = headers.insert(Header {
+                key: &key,
+                value: Some(&value),
+            });
+        }
         let record = FutureRecord::to(&self.topic)
             .payload(&payload)
-            .key(&event.entity_key);
+            .key(&event.entity_key)
+            .headers(headers);
         self.producer
             .send(record, Timeout::After(Duration::from_secs(5)))
             .await

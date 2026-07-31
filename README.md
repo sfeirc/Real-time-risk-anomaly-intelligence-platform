@@ -40,6 +40,7 @@ Then open:
 | API gateway (REST/WS) | http://localhost:8180 |
 | Grafana (metrics) | http://localhost:3000 (admin / `GRAFANA_ADMIN_PASSWORD`) |
 | Redpanda Console (topics) | http://localhost:8090 |
+| Jaeger (distributed tracing) | http://localhost:16686 |
 
 See [`docs/runbook.md`](docs/runbook.md) for the full endpoint list,
 troubleshooting, and manual scenario injection.
@@ -116,6 +117,14 @@ Every service was built and run for real during development — this isn't a
   Redpanda schema registry, not just written — including a self-test that
   registers a deliberately-incompatible schema change and confirms the
   registry actually rejects it (and accepts a genuinely compatible one).
+- **Distributed tracing**: every service exports real OpenTelemetry spans to
+  Jaeger, propagated across every Kafka hop via W3C trace-context message
+  headers. Confirmed in Jaeger's own UI: a complete four-span trace
+  (`ingestion → feature-service → ml-inference → api-gateway`) for a single
+  real event, not a synthetic example. Found and fixed a real bug this way —
+  the Rust OTLP exporter's default HTTP client panicked ("no reactor
+  running") when called from the batch processor's non-Tokio thread; fixed
+  by switching to `opentelemetry-otlp`'s blocking HTTP client feature.
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that

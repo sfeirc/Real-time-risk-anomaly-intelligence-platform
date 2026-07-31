@@ -5,6 +5,7 @@ mod ingest;
 mod metrics;
 mod model;
 mod sink;
+mod telemetry;
 
 use std::sync::Arc;
 
@@ -14,12 +15,12 @@ use sink::KafkaSink;
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .json()
-        .init();
-
     let cfg = Config::from_env();
+    // Kept alive for the process lifetime (never read otherwise): dropping
+    // the provider is what flushes/shuts down the batch span exporter, and
+    // `ingest::run` below never returns - see its own doc comment on why
+    // there's no graceful-shutdown path in this service at all.
+    let _tracer_provider = telemetry::init("ingestion", &cfg.otlp_endpoint);
     let metrics = Arc::new(Metrics::new());
 
     let sink = KafkaSink::new(&cfg.kafka_brokers, &cfg.kafka_topic_raw_events)

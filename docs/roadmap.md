@@ -99,6 +99,28 @@ Redpanda/Kafka replication (`replicas > 1`, `acks=all` already set) and
 ClickHouse sharding/replication (`ReplicatedMergeTree`, distributed tables)
 for the durability and availability guarantees a risk system actually needs.
 
+## Observability: metrics/logs only → distributed tracing (done)
+
+Every service now emits OpenTelemetry spans (`services/*/src/telemetry.rs`
+for the Rust services, `services/*/app/telemetry.py` for the Python ones),
+propagated across every Kafka hop via a W3C `traceparent` message header, to
+Jaeger (`docker-compose.yml`'s `jaeger` service, UI on :16686). Before this,
+`docs/metrics.md`'s latency numbers were aggregate histograms - "p99 is
+174ms" told you the shape of the distribution but not why any *one* slow
+alert was slow. Now `ingest_event → compute_window → score_window →
+relay_to_ws` is one trace per (a representative sampling of) event, with
+per-hop timing, viewable end to end in Jaeger for any single alert.
+
+Two deliberate simplifications, not oversights: (1) `feature-service`
+aggregates many raw events into one window, so it picks the *most recent*
+contributing event's trace as the window's representative parent rather
+than a full span-Link fan-in to every event that contributed - readable
+traces over exhaustive ones, the same tradeoff real windowed-stream tracing
+(Kafka Streams, Flink) usually makes. (2) tracing is best-effort everywhere:
+an export failure or an unreachable Jaeger never affects whether an event
+actually gets processed - no service treats it as a hard dependency (see
+`docker-compose.yml`'s comment on the `jaeger` service).
+
 ## Rules engine: YAML file → owned, audited config service
 
 `services/ml-inference/app/rules.yaml` is read at process start (plus

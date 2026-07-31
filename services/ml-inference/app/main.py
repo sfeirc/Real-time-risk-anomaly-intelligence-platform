@@ -6,8 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response
+from opentelemetry import trace
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-from . import metrics
+from . import metrics, telemetry
 from .clickhouse_io import ClickHouseSink
 from .config import settings
 from .kafka_io import make_consumer, make_producer
@@ -16,6 +18,9 @@ from .schemas import AlertEvent, FeatureEvent
 
 logging.basicConfig(level=logging.INFO, format='{"ts":"%(asctime)s","level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}')
 log = logging.getLogger("ml-inference")
+
+telemetry.init("ml-inference", settings.otel_exporter_otlp_endpoint)
+tracer = trace.get_tracer("ml-inference")
 
 pipeline = MLPipeline(settings)
 
@@ -57,33 +62,44 @@ async def _consume_loop(consumer, producer, ch_sink: ClickHouseSink, alert_queue
 
         metrics.features_consumed_total.labels(domain=f.domain).inc()
 
-        started = loop.time()
-        try:
-            alert = await loop.run_in_executor(_pipeline_executor, pipeline.process, f)
-        except Exception:
-            # A detector bug on one message must not silently kill Kafka
-            # consumption for every message after it (see git history: an
-            # unnamed-vs-named-feature XGBoost mismatch did exactly this —
-            # the exception propagated out of this un-caught executor call,
-            # the `async for` loop died with no log line, and the consumer
-            # only reappeared as a silent group departure ~5 minutes later
-            # via Kafka's max.poll.interval.ms).
-            metrics.processing_errors_total.labels(domain=f.domain).inc()
-            log.exception("pipeline.process raised for entity=%s domain=%s", f.entity_key, f.domain)
-            continue
-        metrics.inference_ms.observe((loop.time() - started) * 1000.0)
+        # Continues the trace feature-service started for this window (see
+        # services/feature-service/src/consumer.rs's compute_window span),
+        # so the whole ingest -> window -> score -> alert path is one trace
+        # in Jaeger, not four disconnected ones.
+        parent_cx = telemetry.extract_parent_context(msg.headers)
+        with tracer.start_as_current_span("score_window", context=parent_cx):
+            started = loop.time()
+            try:
+                alert = await loop.run_in_executor(_pipeline_executor, pipeline.process, f)
+            except Exception:
+                # A detector bug on one message must not silently kill Kafka
+                # consumption for every message after it (see git history: an
+                # unnamed-vs-named-feature XGBoost mismatch did exactly this —
+                # the exception propagated out of this un-caught executor call,
+                # the `async for` loop died with no log line, and the consumer
+                # only reappeared as a silent group departure ~5 minutes later
+                # via Kafka's max.poll.interval.ms).
+                metrics.processing_errors_total.labels(domain=f.domain).inc()
+                log.exception("pipeline.process raised for entity=%s domain=%s", f.entity_key, f.domain)
+                continue
+            metrics.inference_ms.observe((loop.time() - started) * 1000.0)
 
-        if alert is None:
-            continue
+            if alert is None:
+                continue
 
-        metrics.alerts_produced_total.labels(domain=alert.domain, severity=alert.severity).inc()
-        try:
-            await producer.send_and_wait(settings.kafka_topic_alerts, key=alert.entity_key, value=alert.model_dump(mode="json"))
-        except Exception as e:  # noqa: BLE001 - log and keep serving; ClickHouse still gets the row
-            metrics.kafka_produce_errors_total.inc()
-            log.warning("failed to produce alert: %s", e)
+            metrics.alerts_produced_total.labels(domain=alert.domain, severity=alert.severity).inc()
+            try:
+                await producer.send_and_wait(
+                    settings.kafka_topic_alerts,
+                    key=alert.entity_key,
+                    value=alert.model_dump(mode="json"),
+                    headers=telemetry.inject_current_context(),
+                )
+            except Exception as e:  # noqa: BLE001 - log and keep serving; ClickHouse still gets the row
+                metrics.kafka_produce_errors_total.inc()
+                log.warning("failed to produce alert: %s", e)
 
-        await alert_queue.put(alert)
+            await alert_queue.put(alert)
 
 
 async def _clickhouse_flush_loop(ch_sink: ClickHouseSink, alert_queue: asyncio.Queue[AlertEvent]) -> None:
@@ -183,6 +199,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="real-time-risk ml-inference", lifespan=lifespan)
+FastAPIInstrumentor.instrument_app(app)
 
 
 @app.get("/health")

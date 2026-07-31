@@ -60,6 +60,7 @@ flowchart TB
     subgraph Obs["Observability"]
         PROM["Prometheus"]
         GRAF["Grafana"]
+        JAEGER["Jaeger — distributed tracing"]
     end
 
     DG -- WebSocket --> ING
@@ -80,6 +81,7 @@ flowchart TB
     REST & WS --> DASH
     ING & FS & ML & API -. /metrics .-> PROM
     PROM --> GRAF
+    ING & FS & ML & API -. OTLP spans .-> JAEGER
 ```
 
 ## Why these choices
@@ -97,6 +99,7 @@ flowchart TB
 | **JSON on the wire, governed by a real schema registry, not a Confluent wire-format envelope** | Redpanda's schema registry (`scripts/schema_registry.py`) registers every `schemas/*.schema.json` as a subject and enforces BACKWARD compatibility, so a breaking contract change is rejected at registration time — the actual production pattern, not a doc that's easy to forget to update. It's deliberately *not* paired with the Confluent magic-byte wire format: messages stay plain, human-readable JSON (`rpk topic consume` still works without a decoder), because the registry's real value here — reject breaking changes before they ship — doesn't require binary framing at this message size and this team size. See `docs/data-contracts.md`. |
 | **One `operator` role, JWT over a shared API key, gated only at the control plane** | The only action in this API with a real-world side effect is `/api/scenarios/inject`; every other endpoint is read-only telemetry, so a viewer/operator split would gate nothing that isn't already public. A shared operator key exchanged for a short-lived signed token is the simplest thing that's still real auth (not a hardcoded header, not security through obscurity) — see `docs/runbook.md`'s "Authentication" section and `docs/roadmap.md` for what a multi-operator/audit-trail version adds next. |
 | **Deterministic `alert_id` + `ReplacingMergeTree`, not Kafka transactions, for alert idempotency** | `ml-inference`'s `enable.auto.commit` consumer can reprocess a window across a crash-restart (see `docs/roadmap.md` "Kafka semantics"). Deriving `alert_id` from `(domain, entity_key, window_end)` instead of a random UUID, paired with `risk.alerts` as a `ReplacingMergeTree(ts)` keyed on that tuple, makes a reprocessed window collapse to one stored alert instead of a duplicate — real idempotency for the durable audit trail, at a fraction of the cost of Kafka `exactly_once_v2` transactions, which this project doesn't need since features/alerts aren't billing events. |
+| **W3C Trace Context over Kafka headers, OTLP/HTTP to Jaeger, not gRPC** | Every hop (ingestion → feature-service → ml-inference → api-gateway) propagates the *same* trace across two Kafka hops by carrying a `traceparent` message header (see each service's `telemetry.rs`/`telemetry.py`) — Kafka has no built-in trace-context carrier the way HTTP gets for free, so this is manual on both the Rust and Python sides, using each language's standard OTel SDK. OTLP/HTTP over gRPC for the exporter: avoids `tonic`/`protoc` as a new Rust build dependency for a project that already pins carefully to keep builds fast, at no real cost here (a few KB of protobuf per span either way). A `SdkTracerProvider`'s batch exporter runs its HTTP calls on its own dedicated thread outside the Tokio runtime, so the Rust side specifically needs `opentelemetry-otlp`'s `reqwest-blocking-client` feature, not the async default — the async client panics there with "no reactor running" (found by actually running it, not by reading the docs first). |
 
 ## Latency budget
 
@@ -124,7 +127,7 @@ services/
   ml-inference/         Python — detectors, ML ensemble, drift, rules engine
   api-gateway/            Python — REST/WS API for the dashboard
   dashboard/                React/TS — operator UI
-infra/                docker-compose services: Redpanda, ClickHouse, Prometheus, Grafana
+infra/                docker-compose services: Redpanda, ClickHouse, Prometheus, Grafana, Jaeger
 schemas/               JSON Schema copies of docs/data-contracts.md, used in CI
 docs/                  architecture, data contracts, metrics, runbook, roadmap, benchmarks
 tests/

@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use futures_util::StreamExt;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use tracing::Instrument;
 
 use crate::backoff::backoff_delay;
 use crate::metrics::Metrics;
@@ -67,21 +68,30 @@ async fn handle_frame<S: EventSink>(text: &str, sink: &S, metrics: &Metrics) {
     event.ts_ingest = Some(chrono::Utc::now().to_rfc3339());
     let domain = event.domain.as_str();
 
-    metrics.inflight_sends.inc();
-    let result = sink.send(&event).await;
-    metrics.inflight_sends.dec();
+    // Root span for this event's whole trace: feature-service and
+    // ml-inference each continue it via the traceparent header this span's
+    // context gets injected into below (see EventSink::send /
+    // crate::telemetry) - one trace per event, spanning every Kafka hop.
+    let span = tracing::info_span!("ingest_event", entity_key = %event.entity_key, domain = %domain, event_id = %event.event_id);
+    async {
+        metrics.inflight_sends.inc();
+        let result = sink.send(&event).await;
+        metrics.inflight_sends.dec();
 
-    match result {
-        Ok(()) => {
-            metrics.events_total.with_label_values(&[domain]).inc();
-            let elapsed_ms = received_at.elapsed().as_secs_f64() * 1000.0;
-            metrics.ws_to_kafka_ms.observe(elapsed_ms);
-        }
-        Err(e) => {
-            metrics.kafka_errors_total.inc();
-            tracing::warn!(error = %e, entity = %event.entity_key, "failed to produce event to kafka");
+        match result {
+            Ok(()) => {
+                metrics.events_total.with_label_values(&[domain]).inc();
+                let elapsed_ms = received_at.elapsed().as_secs_f64() * 1000.0;
+                metrics.ws_to_kafka_ms.observe(elapsed_ms);
+            }
+            Err(e) => {
+                metrics.kafka_errors_total.inc();
+                tracing::warn!(error = %e, entity = %event.entity_key, "failed to produce event to kafka");
+            }
         }
     }
+    .instrument(span)
+    .await;
 }
 
 #[cfg(test)]

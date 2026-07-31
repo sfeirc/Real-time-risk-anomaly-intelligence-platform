@@ -159,6 +159,28 @@ services:
     depends_on: [prometheus, clickhouse]
     networks: [risk-net]
 
+  jaeger:
+    # All-in-one: in-memory storage, OTLP receiver, and UI in one container -
+    # matches this project's "single-node, pipeline architecture is the
+    # point" scope decision for every other piece of infra (see
+    # docs/roadmap.md "Single-node Redpanda/ClickHouse -> clustered"). Every
+    # service ships spans here via OTLP/HTTP (see each service's
+    # app/telemetry.py or src/telemetry.rs); no service treats it as a hard
+    # dependency (tracing is best-effort - see docs/data-contracts.md), so
+    # there's no depends_on/healthcheck gating anything on it.
+    image: jaegertracing/all-in-one:1.76.0
+    container_name: jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # UI
+      - "4318:4318"   # OTLP HTTP - what every service's exporter targets
+      # Not publishing 4317 (OTLP gRPC): unused (every exporter here uses
+      # HTTP), and it collides with other-on-host OTel collectors often
+      # enough (e.g. a netdata agent's own otel-plug) that there's no
+      # reason to claim the port for a feature nothing here uses.
+    networks: [risk-net]
+
   # ---------------------------------------------------------------------
   # Application services
   # ---------------------------------------------------------------------
@@ -176,6 +198,7 @@ services:
     <<: *service-env
     environment:
       RUST_LOG: info
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redpanda:
         condition: service_healthy
@@ -193,6 +216,7 @@ services:
     <<: *service-env
     environment:
       RUST_LOG: info
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redpanda:
         condition: service_healthy
@@ -206,6 +230,8 @@ services:
     build: ./services/ml-inference
     container_name: ml-inference
     <<: *service-env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redpanda:
         condition: service_healthy
@@ -219,6 +245,8 @@ services:
     build: ./services/api-gateway
     container_name: api-gateway
     <<: *service-env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
       redpanda:
         condition: service_healthy

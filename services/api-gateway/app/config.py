@@ -40,5 +40,9 @@ class Settings(BaseSettings):
     api_gateway_jwt_secret: str = ""
     api_gateway_jwt_expiry_minutes: int = 60
 
+    # Standard OTel env var name (not project-specific) - every OTel SDK in
+    # every language reads this same variable; see app/telemetry.py.
+    otel_exporter_otlp_endpoint: str = "http://jaeger:4318"
+
 
 settings = Settings()
