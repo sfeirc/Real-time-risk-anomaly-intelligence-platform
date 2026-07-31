@@ -66,3 +66,25 @@ class XGBoostDetector:
         dmat = xgb.DMatrix(x, feature_names=self._feature_names)
         raw_score = float(self._booster.predict(dmat)[0])
         return apply_calibration(raw_score, self._calibration)
+
+    def shap_contributions(self, vector: list[float]) -> list[float] | None:
+        """Real per-feature attribution via XGBoost's native SHAP support
+        (`pred_contribs=True`), not the z-like heuristic every other
+        detector shares (see app/explain.py) - this is the one detector
+        trained on real ground truth, so its own attribution is the most
+        trustworthy available whenever it's present (it also gets the
+        highest ensemble weight of any detector, see app/ensemble.py).
+        Returns one signed value per feature, in `feature_names(domain)`
+        order (positive = pushed the score toward anomalous, negative =
+        pushed it toward normal) - the last column XGBoost's pred_contribs
+        output carries (the bias/expected-value term) is dropped here,
+        since callers already have a more directly comparable baseline
+        available (the same rolling mean/std the other detectors use).
+        `None` until a model artifact exists, same as `score()`.
+        """
+        if self._booster is None:
+            return None
+        x = np.asarray(vector, dtype=np.float32).reshape(1, -1)
+        dmat = xgb.DMatrix(x, feature_names=self._feature_names)
+        contribs = self._booster.predict(dmat, pred_contribs=True)[0]
+        return [float(c) for c in contribs[:-1]]

@@ -1,11 +1,19 @@
 """Turns a scored window into a human-readable explanation: which features
-moved the most (`top_features`, a z-like contribution against the same
-rolling mean/std the Isolation Forest normalizes with — reusing that
-baseline rather than inventing another one keeps "why did this fire" and
-"what did the model see" the same numbers), and a rule-based
-`probable_cause` label. The rules are intentionally simple and legible —
-this is meant to be readable in a dashboard tooltip during a demo, not a
-SHAP value dump.
+moved the most (`top_features`), and a rule-based `probable_cause` label.
+The rules behind `probable_cause` are intentionally simple and legible —
+meant to be readable in a dashboard tooltip during a demo, not a model
+dump.
+
+`top_features`' `contribution` comes from one of two sources, in order of
+preference: XGBoost's own SHAP values (`XGBoostDetector.shap_contributions`)
+when that detector is loaded - the one detector trained on real ground
+truth, and the one with the highest ensemble weight (see
+app/ensemble.py), so its attribution is the most trustworthy available
+when present - falling back to a z-like heuristic (deviation from the
+Isolation Forest's own rolling mean/std, the same baseline the model
+itself was fit on) when it isn't. Both share the same `TopFeature` shape,
+so the dashboard and every other consumer don't need to know which one
+produced a given alert's explanation.
 """
 
 from __future__ import annotations
@@ -22,13 +30,22 @@ def compute_top_features(
     mean: np.ndarray | None,
     std: np.ndarray | None,
     k: int = 3,
+    shap_contributions: list[float] | None = None,
 ) -> list[TopFeature]:
     names = feature_names(domain)
     arr = np.asarray(vector, dtype=np.float64)
     baseline = mean if mean is not None else np.zeros_like(arr)
+
+    if shap_contributions is not None:
+        contributions = np.asarray(shap_contributions, dtype=np.float64)
+        order = np.argsort(-np.abs(contributions))[:k]
+        return [
+            TopFeature(feature=names[i], value=float(arr[i]), baseline=float(baseline[i]), contribution=float(contributions[i]))
+            for i in order
+        ]
+
     scale = std.copy() if std is not None else np.ones_like(arr)
     scale[scale < 1e-9] = 1.0
-
     contributions = np.abs((arr - baseline) / scale)
     order = np.argsort(-contributions)[:k]
     return [

@@ -157,7 +157,13 @@ class MLPipeline:
         if severity is None or action is None:
             return None
 
-        top_feats = compute_top_features(domain, vector, iso.mean, iso.std)
+        # Real SHAP attribution when XGBoost is loaded (it gets the highest
+        # ensemble weight of any detector, see ensemble.py, so its own
+        # explanation is the most trustworthy available); the z-like
+        # heuristic otherwise (compute_top_features falls back on its own
+        # when shap_contributions is None - e.g. before a model is trained).
+        shap_contributions = xgb_det.shap_contributions(vector)
+        top_feats = compute_top_features(domain, vector, iso.mean, iso.std, shap_contributions=shap_contributions)
         probable_cause = classify_probable_cause(domain, f, top_feats, detectors)
 
         now = datetime.now(timezone.utc)

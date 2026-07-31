@@ -87,3 +87,43 @@ def test_reload_picks_up_model_written_after_construction(tmp_path):
     assert det.reload() is True
     assert det.ready
     assert det.score([0.0] * len(feature_names("market"))) is not None
+
+
+def test_shap_contributions_is_none_when_not_ready(tmp_path):
+    det = XGBoostDetector(str(tmp_path / "does_not_exist.json"), "market")
+    assert det.shap_contributions([0.0] * len(feature_names("market"))) is None
+
+
+def test_shap_contributions_returns_one_value_per_feature(tmp_path):
+    model_path = tmp_path / "xgb_shap.json"
+    _train_and_save("market", model_path)
+    det = XGBoostDetector(str(model_path), "market")
+
+    vector = [1.0] + [0.0] * (len(feature_names("market")) - 1)
+    contribs = det.shap_contributions(vector)
+    assert contribs is not None
+    assert len(contribs) == len(feature_names("market"))
+
+
+def test_shap_contributions_satisfy_additivity_against_the_raw_margin(tmp_path):
+    """The defining property of SHAP values (not just "some numbers per
+    feature"): they sum with the model's bias/expected-value term to
+    exactly reconstruct the raw prediction margin. Verifying this against
+    xgboost's own raw (non-probability) margin output is what actually
+    proves `shap_contributions` computed real SHAP values, not just that
+    `pred_contribs=True` didn't raise."""
+    model_path = tmp_path / "xgb_shap_additivity.json"
+    _train_and_save("market", model_path, seed=2)
+    det = XGBoostDetector(str(model_path), "market")
+
+    vector = [0.7, -1.2, 0.3, 0.0, 2.1, -0.4, 1.0, 0.2][: len(feature_names("market"))]
+    contribs = det.shap_contributions(vector)
+    assert contribs is not None
+
+    x = np.asarray(vector, dtype=np.float32).reshape(1, -1)
+    dmat = xgb.DMatrix(x, feature_names=feature_names("market"))
+    full_contribs = det._booster.predict(dmat, pred_contribs=True)[0]
+    bias = float(full_contribs[-1])
+    raw_margin = float(det._booster.predict(dmat, output_margin=True)[0])
+
+    assert abs(sum(contribs) + bias - raw_margin) < 1e-3

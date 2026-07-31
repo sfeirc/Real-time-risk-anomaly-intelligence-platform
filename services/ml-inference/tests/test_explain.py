@@ -53,6 +53,33 @@ def test_compute_top_features_without_baseline_uses_zero_mean_unit_std():
     assert top[0].feature == "spread_bps"
 
 
+def test_shap_contributions_when_provided_override_the_zscore_heuristic():
+    # spread_bps (index 2) has the largest *raw deviation* from baseline,
+    # but a real SHAP explanation says order_imbalance (index 3) actually
+    # drove the model's decision - when shap_contributions is provided,
+    # that must win, not the deviation heuristic.
+    vector = [0.1, 0.1, 9.0, 0.1, 0.1, 0.1, 0.1]
+    mean = np.zeros(7)
+    std = np.ones(7)
+    shap = [0.01, 0.01, 0.02, 0.85, 0.01, 0.01, 0.01]
+    top = compute_top_features("market", vector, mean, std, k=1, shap_contributions=shap)
+    assert top[0].feature == "order_imbalance"
+
+
+def test_shap_contributions_preserve_sign_unlike_the_zscore_heuristic():
+    # a negative SHAP value (this feature pushed *toward* normal) must stay
+    # negative in the resulting TopFeature - the fallback heuristic is
+    # always non-negative (np.abs), but a real SHAP explanation is only
+    # useful if direction survives, not just magnitude.
+    vector = [0.1] * 7
+    mean = np.zeros(7)
+    std = np.ones(7)
+    shap = [0.0, -0.9, 0.0, 0.0, 0.0, 0.0, 0.0]
+    top = compute_top_features("market", vector, mean, std, k=1, shap_contributions=shap)
+    assert top[0].feature == "realized_vol"
+    assert top[0].contribution == -0.9
+
+
 def test_market_latency_dominant_classifies_latency_incident():
     f = make_feature_event(domain="market")
     top = [TopFeature(feature="latency_p99_ms", value=500.0, baseline=10.0, contribution=5.0)]

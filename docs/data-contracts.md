@@ -187,6 +187,11 @@ a reprocessed window down to one stored alert instead of a duplicate.
     "probable_cause": "volatility_spike" | "latency_incident" | "fraud_pattern"
                      | "data_corruption" | "regime_change" | "volume_spike" | "unknown",
     "top_features": [
+      // `contribution` is signed when XGBoost is loaded (real SHAP values,
+      // see app/detectors/xgboost_detector.py::shap_contributions -
+      // positive pushes toward anomalous, negative pushes toward normal),
+      // and non-negative (a magnitude-only deviation-from-baseline
+      // heuristic) as a fallback before a model exists - see app/explain.py.
       { "feature": "string", "value": "float64", "baseline": "float64", "contribution": "float64" }
     ]
   },

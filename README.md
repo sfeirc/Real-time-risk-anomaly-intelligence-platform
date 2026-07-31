@@ -180,6 +180,16 @@ Every service was built and run for real during development — this isn't a
   instead of through `make` skipped the ClickHouse password environment fix
   from the breaking-point test, 403ing before the chaos part even started.
   Fixed both, then re-ran for the real result. See `docs/metrics.md` §5.
+- **Real SHAP attribution**: verified two ways, not just "it ran". A unit
+  test checks SHAP's defining *additivity* property (per-feature
+  contributions plus the model's bias term reconstruct the raw prediction
+  margin to within 1e-3 — proof the values are real Shapley contributions,
+  not just numbers `pred_contribs=True` happened to return). Real alerts
+  pulled from the live stack after rebuilding `ml-inference` show genuinely
+  signed contributions (e.g. `log_mean_amount: -0.96`, a feature actively
+  pushing *toward* normal) that the old always-non-negative z-heuristic
+  could never have produced — confirming the new code path is live, not
+  just passing in isolation.
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that
