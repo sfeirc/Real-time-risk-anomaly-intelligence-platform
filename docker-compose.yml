@@ -4,6 +4,15 @@ x-service-env: &service-env
   env_file:
     - .env
 
+# Every long-running service gets this - a killed/crashed container comes
+# back on its own instead of staying down until someone notices (see
+# scripts/chaos_test.py, which specifically depends on this to be present:
+# without it, a killed container simply never returns). The two init
+# containers (redpanda-topics-init, schema-registry-init) deliberately don't
+# get this - they're supposed to exit after running once.
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
 networks:
   risk-net:
     driver: bridge
@@ -20,6 +29,7 @@ services:
   redpanda:
     image: redpandadata/redpanda:v24.2.18
     container_name: redpanda
+    <<: *restart-policy
     command:
       - redpanda
       - start
@@ -51,6 +61,7 @@ services:
   redpanda-console:
     image: redpandadata/console:v2.7.2
     container_name: redpanda-console
+    <<: *restart-policy
     environment:
       KAFKA_BROKERS: redpanda:9092
       KAFKA_SCHEMAREGISTRY_ENABLED: "true"
@@ -103,6 +114,7 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
     container_name: clickhouse
+    <<: *restart-policy
     environment:
       # Without these, the official image restricts the `default` user to
       # localhost-only connections — which breaks every other container on
@@ -134,6 +146,7 @@ services:
   prometheus:
     image: prom/prometheus:v2.54.1
     container_name: prometheus
+    <<: *restart-policy
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
@@ -143,6 +156,7 @@ services:
   grafana:
     image: grafana/grafana:11.2.0
     container_name: grafana
+    <<: *restart-policy
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
@@ -170,6 +184,7 @@ services:
     # there's no depends_on/healthcheck gating anything on it.
     image: jaegertracing/all-in-one:1.76.0
     container_name: jaeger
+    <<: *restart-policy
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
@@ -187,7 +202,7 @@ services:
   data-generator:
     build: ./services/data-generator
     container_name: data-generator
-    <<: *service-env
+    <<: [*service-env, *restart-policy]
     ports:
       - "8765:8765"
     networks: [risk-net]
@@ -195,7 +210,7 @@ services:
   ingestion:
     build: ./services/ingestion
     container_name: ingestion
-    <<: *service-env
+    <<: [*service-env, *restart-policy]
     environment:
       RUST_LOG: info
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
@@ -213,7 +228,7 @@ services:
   feature-service:
     build: ./services/feature-service
     container_name: feature-service
-    <<: *service-env
+    <<: [*service-env, *restart-policy]
     environment:
       RUST_LOG: info
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
@@ -229,7 +244,7 @@ services:
   ml-inference:
     build: ./services/ml-inference
     container_name: ml-inference
-    <<: *service-env
+    <<: [*service-env, *restart-policy]
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
@@ -244,7 +259,7 @@ services:
   api-gateway:
     build: ./services/api-gateway
     container_name: api-gateway
-    <<: *service-env
+    <<: [*service-env, *restart-policy]
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
     depends_on:
@@ -263,6 +278,7 @@ services:
         VITE_API_BASE_URL: http://localhost:8180
         VITE_WS_URL: ws://localhost:8180/ws
     container_name: dashboard
+    <<: *restart-policy
     ports:
       - "5173:80"
     depends_on: [api-gateway]

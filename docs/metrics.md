@@ -72,6 +72,32 @@ summarized in the root `README.md`.
 | `drift_detected` | `true` if any feature's PSI > 0.2 or KS p-value < 0.01 |
 | `precision`/`recall`/`f1` before vs. after drift | The `regime_change` scenario (see `services/data-generator/app/scenarios.py`) *is* the drift-injection mechanism: it permanently shifts an entity's underlying volatility/amount/decline-rate baseline (only its ground-truth *label* is temporary), so running `tests/eval/run_eval.py` before and after one has fired gives a measured before/after delta, not a claim. |
 
+## 5. Resilience / recovery
+
+`scripts/chaos_test.py` SIGKILLs each core service's process (from inside
+the container - see the script's docstring for why `docker kill` from the
+host doesn't exercise this the same way: Docker's `unless-stopped` restart
+policy explicitly does not fire for a host-initiated stop, only for the
+container's own process dying) and measures two things against the live
+system, not a claim:
+
+| Metric | Definition |
+|---|---|
+| `process_recovery_s` | time from kill until `/health` responds again - proves the container restarted, not that data is flowing |
+| `pipeline_recovery_s` | time from kill until the service's own steady-throughput Prometheus counter is measurably higher than its pre-kill value, confirmed twice a few seconds apart |
+
+Latest run (see `docs/benchmarks/latest.json`'s `chaos_test` key): every
+service's process recovered in single-digit milliseconds (Docker restarting
+an already-pulled image is fast) and resumed real pipeline throughput
+within single-digit seconds - `api-gateway`'s ~9.6s is a measurement
+artifact, not a real regression: its chosen liveness counter
+(`api_model_metrics_relayed_total`) only increments once per domain per
+`model_metrics_interval_s` (30s), so this number is bounded by that cadence,
+not by how fast api-gateway itself recovered (its alert-relay path, gated
+by `alerts_relayed_total` instead, resumes immediately - just harder to
+observe reliably in a short test window since alerts are comparatively
+sparse).
+
 ## Severity thresholds (defaults, `services/ml-inference/app/rules.yaml`)
 
 | `anomaly_score` | severity | action |
@@ -86,6 +112,7 @@ the rules engine section of `ARCHITECTURE.md`.
 
 ## Latest measured numbers
 
-Populated by `scripts/load_test.py` and `tests/eval/run_eval.py` once the
-pipeline is running end-to-end; see `docs/benchmarks/latest.json` for the raw
-output and the root `README.md` for the human-readable summary table.
+Populated by `scripts/load_test.py`, `tests/eval/run_eval.py`, and
+`scripts/chaos_test.py` once the pipeline is running end-to-end; see
+`docs/benchmarks/latest.json` for the raw output and the root `README.md`
+for the human-readable summary table.

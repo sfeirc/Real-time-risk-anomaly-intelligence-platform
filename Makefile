@@ -2,7 +2,8 @@
         setup test test-rust test-python test-js \
         lint fmt \
         eval load-test demo \
-        schema-register schema-check schema-self-test
+        schema-register schema-check schema-self-test \
+        chaos-test
 
 COMPOSE := docker compose
 PY_SERVICES := ml-inference api-gateway data-generator
@@ -108,3 +109,10 @@ schema-check:
 
 schema-self-test:
 	cd tests/integration && .venv/bin/python ../../scripts/schema_registry.py self-test
+
+## --- Chaos / fault-injection ------------------------------------------------
+## Kills each core service (SIGKILL) one at a time and measures real recovery
+## time against the live stack. See scripts/chaos_test.py.
+
+chaos-test:
+	cd tests/integration && .venv/bin/python ../../scripts/chaos_test.py

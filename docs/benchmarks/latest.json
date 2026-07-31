@@ -101,5 +101,35 @@
         "memory": "669.9MiB / 30.26GiB"
       }
     }
+  },
+  "chaos_test": {
+    "generated_at": "2026-07-31T15:15:27.062954+00:00",
+    "timeout_s": 45.0,
+    "results": {
+      "ingestion": {
+        "baseline_throughput_counter": 19843.0,
+        "process_recovery_s": 0.005006588064134121,
+        "pipeline_recovery_s": 3.022959918016568,
+        "recovered": true
+      },
+      "feature-service": {
+        "baseline_throughput_counter": 479.0,
+        "process_recovery_s": 0.00825940491631627,
+        "pipeline_recovery_s": 4.540574574028142,
+        "recovered": true
+      },
+      "ml-inference": {
+        "baseline_throughput_counter": 533.0,
+        "process_recovery_s": 0.0058932239189744,
+        "pipeline_recovery_s": 2.51616381900385,
+        "recovered": true
+      },
+      "api-gateway": {
+        "baseline_throughput_counter": 8.0,
+        "process_recovery_s": 0.006746458006091416,
+        "pipeline_recovery_s": 9.620309947989881,
+        "recovered": true
+      }
+    }
   }
 }

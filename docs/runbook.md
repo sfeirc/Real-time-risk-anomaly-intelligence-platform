@@ -41,6 +41,7 @@ make lint                    # clippy + ruff + eslint
 
 make eval                     # precision/recall/drift report -> docs/benchmarks/latest.json
 make load-test                 # throughput/latency benchmark -> docs/benchmarks/latest.json
+make chaos-test                  # kills each core service, measures real recovery time -> docs/benchmarks/latest.json
 make demo                       # scripted end-to-end demo (see scripts/demo.sh)
 ```
 

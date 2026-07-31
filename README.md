@@ -125,6 +125,14 @@ Every service was built and run for real during development — this isn't a
   the Rust OTLP exporter's default HTTP client panicked ("no reactor
   running") when called from the batch processor's non-Tokio thread; fixed
   by switching to `opentelemetry-otlp`'s blocking HTTP client feature.
+- **Chaos test**: `scripts/chaos_test.py` actually SIGKILLs each core
+  service's process and measures real recovery time against the live
+  system. First run measured *nothing* recovering — not a script bug, a real
+  Docker behavior: killing a container from the host suppresses
+  `unless-stopped`'s auto-restart, since Docker treats that as an
+  intentional stop. Fixed by killing the process from inside the container
+  instead (the actual crash/OOM scenario the restart policy exists for);
+  see `docs/metrics.md` §5 for the measured recovery numbers.
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that
@@ -200,3 +208,18 @@ feature-service 2.4% CPU / 31MB, ml-inference 0.2% CPU / 339MB (PyTorch +
 scikit-learn loaded), api-gateway 0.2% CPU / 49MB, ClickHouse 4.7% CPU /
 985MB, Redpanda 4.2% CPU / 670MB — on a single developer workstation, no
 tuning applied.
+
+**Recovery from a crashed process** (`scripts/chaos_test.py`, SIGKILL to
+each core service's own process, not a graceful stop — see `docs/metrics.md`
+§5): every service's container came back and resumed real Kafka throughput
+automatically.
+
+| Service | Process recovery | Pipeline throughput resumed |
+|---|---|---|
+| ingestion | 5 ms | 3.0 s |
+| feature-service | 8 ms | 4.5 s |
+| ml-inference | 6 ms | 2.5 s |
+| api-gateway | 7 ms | 9.6 s* |
+
+\* bounded by the 30s cadence of the specific liveness counter this run
+happened to check, not a real regression — see `docs/metrics.md` §5.
