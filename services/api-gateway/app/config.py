@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     clickhouse_user: str = "default"
     clickhouse_password: str = ""
 
-    api_gateway_http_port: int = 8080
+    # not 8080: a common enough dev-tool default to collide on a real
+    # workstation that this project picks an out-of-the-way port instead.
+    api_gateway_http_port: int = 8180
 
     data_generator_url: str = "http://data-generator:8765"
 

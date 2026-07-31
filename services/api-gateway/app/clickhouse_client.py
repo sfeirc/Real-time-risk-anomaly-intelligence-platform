@@ -27,7 +27,21 @@ class ClickHouseClient:
     async def query_rows(self, query: str, params: dict[str, Any] | None = None) -> list[dict]:
         """`query` uses ClickHouse parameter placeholders, e.g. `{domain:String}`;
         `params` supplies the matching Python values."""
-        request_params = {"database": self._database, "query": f"{query} FORMAT JSONEachRow"}
+        request_params = {
+            "database": self._database,
+            "query": f"{query} FORMAT JSONEachRow",
+            # ClickHouse quotes UInt64/Int64 as JSON strings by default (a JS
+            # safe-integer safety net for values that could exceed 2^53).
+            # Every one of ours (alert_count, events, events_scored, ...)
+            # stays far below that, and the dashboard does arithmetic
+            # directly on these fields (`0 += row.events`) — with the
+            # default quoting that's string concatenation, not addition,
+            # and silently produces a huge garbage number instead of an
+            # error. Disabling the quoting here fixes it at the one place
+            # that talks to ClickHouse, instead of coercing types in every
+            # frontend chart that touches a UInt64 column.
+            "output_format_json_quote_64bit_integers": "0",
+        }
         for key, value in (params or {}).items():
             request_params[f"param_{key}"] = value
 

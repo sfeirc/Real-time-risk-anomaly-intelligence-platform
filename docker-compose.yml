@@ -186,8 +186,7 @@ services:
       clickhouse:
         condition: service_healthy
     ports:
-      - "8000:8000"
-      - "9103:9103"
+      - "8010:8010"
     networks: [risk-net]
 
   api-gateway:
@@ -200,15 +199,15 @@ services:
       clickhouse:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8180:8180"
     networks: [risk-net]
 
   dashboard:
     build:
       context: ./services/dashboard
       args:
-        VITE_API_BASE_URL: http://localhost:8080
-        VITE_WS_URL: ws://localhost:8080/ws
+        VITE_API_BASE_URL: http://localhost:8180
+        VITE_WS_URL: ws://localhost:8180/ws
     container_name: dashboard
     ports:
       - "5173:80"

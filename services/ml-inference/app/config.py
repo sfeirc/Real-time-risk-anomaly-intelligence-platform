@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     clickhouse_user: str = "default"
     clickhouse_password: str = ""
 
-    ml_inference_http_port: int = 8000
+    # not 8000/8080: common dev-tool defaults that collide often enough on a
+    # real workstation that this project picks out-of-the-way ones instead.
+    ml_inference_http_port: int = 8010
 
     anomaly_watch_threshold: float = 0.55
     anomaly_alert_threshold: float = 0.75

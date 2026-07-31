@@ -20,8 +20,8 @@ Endpoints once everything is healthy:
 | Service | URL |
 |---|---|
 | Dashboard | http://localhost:5173 |
-| API gateway | http://localhost:8080 (REST), ws://localhost:8080/ws |
-| ML inference (direct) | http://localhost:8000 |
+| API gateway | http://localhost:8180 (REST), ws://localhost:8180/ws |
+| ML inference (direct) | http://localhost:8010 |
 | Redpanda Console (topic browser) | http://localhost:8090 |
 | ClickHouse HTTP | http://localhost:8123 |
 | Prometheus | http://localhost:9090 |

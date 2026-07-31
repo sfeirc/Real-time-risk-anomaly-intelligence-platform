@@ -57,3 +57,20 @@ async def test_query_rows_sends_basic_auth():
 
     client = make_client(handler)
     await client.query_rows("SELECT 1")
+
+
+@pytest.mark.asyncio
+async def test_query_rows_disables_64bit_integer_quoting():
+    """Without this, ClickHouse UInt64 columns (alert_count, events,
+    events_scored, ...) come back as JSON strings and the dashboard's
+    `0 += row.events`-style arithmetic silently does string concatenation
+    instead of addition — see git history for the exact symptom."""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(dict(request.url.params))
+        return httpx.Response(200, text="")
+
+    client = make_client(handler)
+    await client.query_rows("SELECT alert_count FROM alerts_rollup_5m")
+    assert captured["output_format_json_quote_64bit_integers"] == "0"
