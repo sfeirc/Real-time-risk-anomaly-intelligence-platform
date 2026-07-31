@@ -47,7 +47,7 @@ def classify_probable_cause(domain: str, f: FeatureEvent, top_features: list[Top
             return "fraud_pattern"
         if top_name == "latency_p99_ms":
             return "latency_incident"
-        if top_name == "throughput_eps":
+        if top_name in ("throughput_eps", "velocity_count"):
             return "volume_spike"
         if top_name == "error_rate":
             return "data_corruption"
@@ -59,7 +59,7 @@ def classify_probable_cause(domain: str, f: FeatureEvent, top_features: list[Top
 
     if top_name == "latency_p99_ms":
         return "latency_incident"
-    if top_name == "throughput_eps":
+    if top_name in ("throughput_eps", "velocity_count"):
         return "volume_spike"
     if top_name == "error_rate":
         return "data_corruption"

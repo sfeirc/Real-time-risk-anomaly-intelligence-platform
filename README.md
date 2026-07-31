@@ -133,6 +133,16 @@ Every service was built and run for real during development — this isn't a
   intentional stop. Fixed by killing the process from inside the container
   instead (the actual crash/OOM scenario the restart policy exists for);
   see `docs/metrics.md` §5 for the measured recovery numbers.
+- **XGBoost retraining**: `scripts/train_xgboost.py`'s new time-series CV +
+  calibration + `velocity_count` feature path was run for real against live
+  ClickHouse data (19,416 feature windows, 1,211 labeled anomalous), not
+  just written — real measured AUCPR and a real, verified Brier-score
+  improvement from calibration (`docs/metrics.md` §6). The retrained,
+  calibrated 8-feature models were reloaded into the live `ml-inference`
+  container and confirmed producing real alerts with in-range calibrated
+  scores. Adding the new feature broke four unit tests that hardcoded the
+  old 7-feature vector length — fixed by deriving the length from
+  `feature_names()` instead, so the next feature added won't repeat this.
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that
@@ -223,3 +233,11 @@ automatically.
 
 \* bounded by the 30s cadence of the specific liveness counter this run
 happened to check, not a real regression — see `docs/metrics.md` §5.
+
+**XGBoost training quality** (`scripts/train_xgboost.py`, time-series CV +
+isotonic calibration + a rolling multi-window `velocity_count` feature —
+see `docs/metrics.md` §6): held-out AUCPR 0.322 (market) / 0.370 (payments)
+against no-skill baselines of 0.085 / 0.052; calibration cut Brier score
+0.0700→0.0654 (market) and 0.0395→0.0374 (payments) on data the deployed
+model never trained on. These move run to run as more data accumulates —
+reported as the latest measurement, not a fixed score.

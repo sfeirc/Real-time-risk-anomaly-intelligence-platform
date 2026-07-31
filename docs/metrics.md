@@ -98,6 +98,37 @@ by `alerts_relayed_total` instead, resumes immediately - just harder to
 observe reliably in a short test window since alerts are comparatively
 sparse).
 
+## 6. XGBoost training quality
+
+`scripts/train_xgboost.py` (see its module docstring for the full method)
+reports, per domain, against a held-out split the deployed model was
+*never* trained on:
+
+| Metric | Definition |
+|---|---|
+| `cv_mean_val_aucpr` | mean held-out average precision (AUCPR) across `TimeSeriesSplit` folds, used to select hyperparameters |
+| `held_out_aucpr` | AUCPR of the actual deployed model on its own held-out split |
+| `brier_score_before/after_calibration` | mean squared error between predicted probability and outcome, before vs. after the isotonic calibrator (`app/calibration.py`) is applied - lower is better-calibrated |
+
+Latest run (see `docs/benchmarks/latest.json`'s `xgboost_training` key):
+
+| Domain | Train / held-out rows | held-out positives | `cv_mean_val_aucpr` | `held_out_aucpr` | Brier before → after |
+|---|---|---|---|---|---|
+| market | 8,880 / 2,960 | 253 | 0.348 | 0.322 | 0.0700 → 0.0654 |
+| payments | 5,682 / 1,894 | 98 | 0.465 | 0.370 | 0.0395 → 0.0374 |
+
+Read the AUCPR numbers against the right baseline: a no-skill classifier's
+AUCPR equals the positive rate of the set it's scored on, not 0.5 the way
+AUC-ROC's baseline is. That's 253/2,960 = 0.085 for market's held-out split
+and 98/1,894 = 0.052 for payments' - so 0.322 and 0.370 mean XGBoost is
+finding real signal well above chance, not that this is a solved problem.
+It's one voter in the ensemble (see `ARCHITECTURE.md`'s ensemble
+rationale), not the whole detector. These numbers move run to run as more
+data accumulates and the held-out window shifts (the previous run, on a
+smaller data volume before `velocity_count` was added, measured higher
+AUCPR) - reported as the current measurement, not a permanent score;
+re-running `scripts/train_xgboost.py` is expected to move them again.
+
 ## Severity thresholds (defaults, `services/ml-inference/app/rules.yaml`)
 
 | `anomaly_score` | severity | action |

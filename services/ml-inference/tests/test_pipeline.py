@@ -141,4 +141,4 @@ def test_drift_metrics_available_after_warmup():
     event = pipeline.check_drift_and_build_metrics("market")
     assert event.model_id == "ensemble-market"
     assert event.events_scored >= 60
-    assert set(event.psi_by_feature.keys()) == {"zscore", "realized_vol", "spread_bps", "order_imbalance", "throughput_eps", "latency_p99_ms", "error_rate"}
+    assert set(event.psi_by_feature.keys()) == {"zscore", "realized_vol", "spread_bps", "order_imbalance", "throughput_eps", "latency_p99_ms", "error_rate", "velocity_count"}

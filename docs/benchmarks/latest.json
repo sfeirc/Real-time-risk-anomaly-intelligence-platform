@@ -131,5 +131,42 @@
         "recovered": true
       }
     }
+  },
+  "xgboost_training": {
+    "generated_at": "2026-07-31T16:07:17.720303+00:00",
+    "by_domain": {
+      "market": {
+        "domain": "market",
+        "train_rows": 8880,
+        "held_out_rows": 2960,
+        "held_out_positive_rows": 253,
+        "best_params": {
+          "max_depth": 4,
+          "eta": 0.1,
+          "min_child_weight": 1,
+          "best_iteration": 43
+        },
+        "cv_mean_val_aucpr": 0.3474913674467497,
+        "held_out_aucpr": 0.32145588200200154,
+        "brier_score_before_calibration": 0.06996966384619162,
+        "brier_score_after_calibration": 0.06544595129823408
+      },
+      "payments": {
+        "domain": "payments",
+        "train_rows": 5682,
+        "held_out_rows": 1894,
+        "held_out_positive_rows": 98,
+        "best_params": {
+          "max_depth": 4,
+          "eta": 0.1,
+          "min_child_weight": 5,
+          "best_iteration": 117
+        },
+        "cv_mean_val_aucpr": 0.46540516218755634,
+        "held_out_aucpr": 0.3702165535782915,
+        "brier_score_before_calibration": 0.0395077146494668,
+        "brier_score_after_calibration": 0.03741078644497256
+      }
+    }
   }
 }

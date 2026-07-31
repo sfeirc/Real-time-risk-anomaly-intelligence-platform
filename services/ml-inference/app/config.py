@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     cusum_slack_k: float = 0.5
     cusum_threshold_h: float = 5.0
 
+    # Rolling sum of `count` over this many trailing windows per entity
+    # (see app/detectors/velocity.py) - a multi-window "how busy has this
+    # entity been recently" signal, distinct from throughput_eps/count's
+    # "how busy is *this* window". 20 windows is ~40s at the market default
+    # (2s windows) and ~100s at the payments default (5s windows) - a
+    # deliberately shared, un-tuned-per-domain default (see docs/roadmap.md).
+    velocity_window_count: int = 20
+
     xgboost_model_path: str = "app/models/artifacts/xgboost_{domain}.json"
 
     rules_path: str = "app/rules.yaml"

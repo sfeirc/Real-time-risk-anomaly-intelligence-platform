@@ -20,6 +20,7 @@ from .config import Settings
 from .detectors.autoencoder import RollingAutoencoder
 from .detectors.isolation_forest import RollingIsolationForest
 from .detectors.statistical import CusumDetector, EwmaRunRulesDetector, ZScoreDetector
+from .detectors.velocity import RollingVelocity
 from .detectors.xgboost_detector import XGBoostDetector
 from .drift import DriftMonitor
 from .ensemble import combine
@@ -89,6 +90,7 @@ class MLPipeline:
         self.zscore_detector = ZScoreDetector()
         self.ewma_rules = EwmaRunRulesDetector()
         self.cusum = CusumDetector(k=cfg.cusum_slack_k, h=cfg.cusum_threshold_h)
+        self.velocity = RollingVelocity(window_count=cfg.velocity_window_count)
 
         self.iso_forests = {
             d: RollingIsolationForest(
@@ -122,7 +124,8 @@ class MLPipeline:
 
     def process(self, f: FeatureEvent) -> AlertEvent | None:
         started = time.perf_counter()
-        vector = to_vector(f)
+        velocity_count = self.velocity.observe_and_get(f.entity_key, f.count)
+        vector = to_vector(f, velocity_count)
         domain = f.domain
 
         iso = self.iso_forests[domain]
