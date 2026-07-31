@@ -170,6 +170,16 @@ Every service was built and run for real during development — this isn't a
   volume into those entities' real EWMA/z-score baselines; fixed to use
   disjoint synthetic entity keys, and cleaned up the already-inserted
   contaminated rows from ClickHouse before reporting final numbers.
+- **Infra-tier chaos test**: `scripts/chaos_test_infra.py` killed Redpanda
+  and ClickHouse themselves (not just the four application services) and
+  confirmed both recover with zero data loss and every dependent service
+  reconnecting automatically. Its first run silently failed both checks —
+  not because recovery didn't work, but because of two real bugs in the
+  test itself: a naive fixed-width string slice missed `true` in `rpk`'s
+  heavily-padded health-check output, and running the script directly
+  instead of through `make` skipped the ClickHouse password environment fix
+  from the breaking-point test, 403ing before the chaos part even started.
+  Fixed both, then re-ran for the real result. See `docs/metrics.md` §5.
 
 Several real bugs were found this way and are documented in the commit
 history rather than silently fixed: a ClickHouse config bind-mount that

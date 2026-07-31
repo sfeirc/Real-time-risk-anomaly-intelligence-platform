@@ -3,7 +3,7 @@
         lint fmt \
         eval load-test demo \
         schema-register schema-check schema-self-test \
-        chaos-test breaking-point-test kafka-load-test
+        chaos-test chaos-test-infra breaking-point-test kafka-load-test
 
 COMPOSE := docker compose
 PY_SERVICES := ml-inference api-gateway data-generator
@@ -134,6 +134,12 @@ schema-self-test:
 
 chaos-test:
 	cd tests/integration && .venv/bin/python ../../scripts/chaos_test.py
+
+## Kills Redpanda and ClickHouse themselves (not just the 4 app services
+## above) - data durability + cascading-reconnection checks, see
+## scripts/chaos_test_infra.py.
+chaos-test-infra:
+	cd tests/integration && .venv/bin/python ../../scripts/chaos_test_infra.py
 
 ## --- Breaking point -----------------------------------------------------
 ## Escalates data-generator's event rate until the pipeline can't keep up,

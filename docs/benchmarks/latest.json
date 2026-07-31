@@ -228,5 +228,47 @@
         "memory": "836.6MiB / 30.26GiB"
       }
     }
+  },
+  "chaos_test_infra": {
+    "generated_at": "2026-07-31T19:42:36.282213+00:00",
+    "results": {
+      "redpanda": {
+        "topics_before": 5,
+        "topics_after": 5,
+        "data_intact": true,
+        "process_recovery_s": 0.08545810298528522,
+        "app_service_recovery": {
+          "ingestion": {
+            "baseline": 592772.0,
+            "recovered": true,
+            "recovery_s": 1.0163844419876114
+          },
+          "feature-service": {
+            "baseline": 66698.0,
+            "recovered": true,
+            "recovery_s": 4.038984530023299
+          },
+          "ml-inference": {
+            "baseline": 52989.0,
+            "recovered": true,
+            "recovery_s": 0.006547144963406026
+          },
+          "api-gateway": {
+            "baseline": 76.0,
+            "recovered": true,
+            "recovery_s": 12.085270183975808
+          }
+        },
+        "fully_recovered": true
+      },
+      "clickhouse": {
+        "rows_before": 1179,
+        "rows_after": 1179,
+        "data_intact": true,
+        "process_recovery_s": 0.005444816080853343,
+        "writes_resumed_s": 1.0141999830957502,
+        "fully_recovered": true
+      }
+    }
   }
 }

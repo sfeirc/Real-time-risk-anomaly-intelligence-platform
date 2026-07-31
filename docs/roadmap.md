@@ -99,6 +99,14 @@ Redpanda/Kafka replication (`replicas > 1`, `acks=all` already set) and
 ClickHouse sharding/replication (`ReplicatedMergeTree`, distributed tables)
 for the durability and availability guarantees a risk system actually needs.
 
+`scripts/chaos_test_infra.py` measures what single-node *does* give you: a
+killed Redpanda/ClickHouse process recovers with zero data loss (the volume
+survives) and every dependent service reconnects automatically (see
+`docs/metrics.md` §5) - real resilience, but only against a process crash
+on the same node. It says nothing about what clustering is actually for:
+surviving the *node itself* disappearing (disk failure, host loss), which
+single-node fundamentally can't - there's no replica to fail over to.
+
 ## Observability: metrics/logs only → distributed tracing (done)
 
 Every service now emits OpenTelemetry spans (`services/*/src/telemetry.rs`

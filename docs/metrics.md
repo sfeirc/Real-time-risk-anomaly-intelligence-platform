@@ -98,6 +98,29 @@ by `alerts_relayed_total` instead, resumes immediately - just harder to
 observe reliably in a short test window since alerts are comparatively
 sparse).
 
+`scripts/chaos_test_infra.py` extends the same idea to the shared infra
+tier every application service depends on - Redpanda and ClickHouse
+themselves, not just the four application services above. Two things this
+checks that the application-service test doesn't need to: **data
+durability** (does the volume survive a process kill, not just the
+container) and **cascading reconnection** (do all four dependent
+application services resume their own throughput after the shared
+component recovers, not just does the component's own health check pass).
+
+Latest run: both recovered with zero data loss and every dependent service
+reconnecting automatically.
+
+| | Redpanda | ClickHouse |
+|---|---|---|
+| Process recovery | 0.09s | 0.005s |
+| Data intact | yes (5 topics before and after) | yes (1,179 `risk.alerts` rows before and after) |
+| Dependent services resumed | ingestion 1.0s, feature-service 4.0s, ml-inference 0.007s, api-gateway 12.1s | feature-service writes resumed in 1.0s |
+
+api-gateway's 12.1s is the slowest of the four here too, and for the same
+reason as its ~9.6s figure above: the liveness signal used
+(`api_model_metrics_relayed_total`) is bounded by a 30s cadence, not by how
+fast api-gateway itself reconnected.
+
 ## 6. XGBoost training quality
 
 `scripts/train_xgboost.py` (see its module docstring for the full method)
